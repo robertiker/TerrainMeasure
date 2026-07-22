@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Medidor Inercial 3D PWA</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #121212;
+      color: #fff;
+      user-select: none;
+    }
+    #ui-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none; /* Deja pasar los gestos táctiles al canvas 3D */
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      box-sizing: border-box;
+    }
+    #metrics {
+      pointer-events: auto;
+      padding: 12px;
+      background: rgba(30, 30, 30, 0.85);
+      backdrop-filter: blur(8px);
+      display: flex;
+      justify-content: space-around;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .metric { text-align: center; }
+    .metric span { display: block; font-size: 1.1rem; font-weight: bold; color: #4caf50; }
+    #controls {
+      pointer-events: auto;
+      padding: 16px;
+      background: rgba(30, 30, 30, 0.85);
+      backdrop-filter: blur(8px);
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    button {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 6px;
+      font-weight: bold;
+      cursor: pointer;
+      font-size: 0.9rem;
+      transition: opacity 0.2s;
+    }
+    button:active { opacity: 0.7; }
+    .btn-sim { background: #ff9800; color: #fff; }
+    .btn-close { background: #4caf50; color: #fff; }
+    .btn-clear { background: #f44336; color: #fff; }
+    button:disabled { background: #555; opacity: 0.5; cursor: not-allowed; }
+    #canvas3d { width: 100vw; height: 100vh; display: block; }
+  </style>
+
+  <!-- Importación de Three.js y OrbitControls vía ES Modules -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+
+  <div id="ui-container">
+    <div id="metrics">
+      <div class="metric">Puntos: <span id="lbl-pts">0</span></div>
+      <div class="metric">Perímetro: <span id="lbl-per">0.00 m</span></div>
+      <div class="metric">Área (2D): <span id="lbl-area">-- m²</span></div>
+    </div>
+
+    <div id="controls">
+      <button class="btn-sim" id="btnAdd">+ Simular Punto 3D</button>
+      <button class="btn-close" id="btnClose" disabled>Cerrar Plano</button>
+      <button class="btn-clear" id="btnClear">Limpiar</button>
+    </div>
+  </div>
+
+  <canvas id="canvas3d"></canvas>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // --- ESTADO DE LA APLICACIÓN ---
+    const points = []; // Arreglo de objetos THREE.Vector3(x, y, z)
+    let isClosed = false;
+
+    // --- CONFIGURACIÓN DE ESCENA THREE.JS ---
+    const canvas = document.getElementById('canvas3d');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x121212);
+
+    // Cámara Perspectiva
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(5, 8, 10); // Posición inicial en diagonal para apreciar el 3D
+
+    // Renderizador 3D
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+    // Controles de Órbita (Rotación 3D, Zoom y Panorámica)
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true; // Movimiento fluido e inercial
+    controls.dampingFactor = 0.05;
+
+    // Rejilla de referencia en el suelo (Grid)
+    const gridHelper = new THREE.GridHelper(20, 20, 0x444444, 0x222222);
+    scene.add(gridHelper);
+
+    // Iluminación
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+    scene.add(ambientLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dirLight.position.set(10, 20, 10);
+    scene.add(dirLight);
+
+    // Grupos contenedores para objetos dinámicos
+    const lineGroup = new THREE.Group();
+    const nodeGroup = new THREE.Group();
+    let meshSurface = null;
+    scene.add(lineGroup);
+    scene.add(nodeGroup);
+
+    // --- MÓDULO DE ACTUALIZACIÓN VISUAL ---
+    function update3DScene() {
+      // Limpiar geometría previa
+      lineGroup.clear();
+      nodeGroup.clear();
+      if (meshSurface) {
+        scene.remove(meshSurface);
+        meshSurface.geometry.dispose();
+        meshSurface.material.dispose();
+        meshSurface = null;
+      }
+
+      if (points.length === 0) return;
+
+      // 1. DIBUJAR NODOS (PUNTOS EN EL ESPACIO)
+      const sphereGeo = new THREE.SphereGeometry(0.12, 16, 16);
+      points.forEach((p, i) => {
+        let color = 0x2196f3; // Azul por defecto
+        if (i === 0) color = 0xf44336; // Rojo (Origen)
+        else if (i === points.length - 1 && !isClosed) color = 0xff9800; // Naranja (Último)
+
+        const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.3 });
+        const sphere = new THREE.Mesh(sphereGeo, mat);
+        sphere.position.copy(p);
+        nodeGroup.add(sphere);
+      });
+
+      // 2. DIBUJAR LÍNEAS 3D (TRAYECTORIA)
+      if (points.length > 1) {
+        const linePoints = [...points];
+        if (isClosed) linePoints.push(points[0]); // Conectar de vuelta al origen
+
+        const lineGeo = new THREE.BufferGeometry().setFromPoints(linePoints);
+        const lineMat = new THREE.LineBasicMaterial({
+          color: isClosed ? 0x4caf50 : 0x2196f3,
+          linewidth: 3
+        });
+        const line = new THREE.Line(lineGeo, lineMat);
+        lineGroup.add(line);
+      }
+
+      // 3. GENERAR SUPERFICIE / RELLENO (SI ESTÁ CERRADO)
+      if (isClosed && points.length >= 3) {
+        const shape = new THREE.Shape();
+        // Proyectamos el plano 3D al plano 2D local para formar la forma
+        shape.moveTo(points[0].x, points[0].z);
+        for (let i = 1; i < points.length; i++) {
+          shape.lineTo(points[i].x, points[i].z);
+        }
+
+        const shapeGeo = new THREE.ShapeGeometry(shape);
+        // Rotamos para alinear la superficie horizontalmente
+        shapeGeo.rotateX(Math.PI / 2);
+
+        const shapeMat = new THREE.MeshBasicMaterial({
+          color: 0x4caf50,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.35
+        });
+
+        meshSurface = new THREE.Mesh(shapeGeo, shapeMat);
+        // Ajuste fino en Y para evitar parpadeo visual con el suelo
+        meshSurface.position.y = 0.001; 
+        scene.add(meshSurface);
+      }
+    }
+
+    // --- CÁLCULOS Y MÉTRICAS ---
+    function updateMetrics() {
+      document.getElementById('lbl-pts').innerText = points.length;
+      document.getElementById('btnClose').disabled = points.length < 3 || isClosed;
+
+      let perimeter = 0;
+      for (let i = 1; i < points.length; i++) {
+        perimeter += points[i].distanceTo(points[i - 1]);
+      }
+      if (isClosed && points.length > 2) {
+        perimeter += points[points.length - 1].distanceTo(points[0]);
+      }
+      document.getElementById('lbl-per').innerText = perimeter.toFixed(2) + ' m';
+
+      // Cálculo de área plana (proyección XZ)
+      if (isClosed && points.length >= 3) {
+        let area = 0;
+        for (let i = 0; i < points.length; i++) {
+          const p1 = points[i];
+          const p2 = points[(i + 1) % points.length];
+          area += (p1.x * p2.z) - (p2.x * p1.z);
+        }
+        document.getElementById('lbl-area').innerText = (Math.abs(area) / 2).toFixed(2) + ' m²';
+      } else {
+        document.getElementById('lbl-area').innerText = '-- m²';
+      }
+    }
+
+    // --- SIMULACIÓN DE RECEPCIÓN DE DATOS BLE 3D ---
+    // Puntos de prueba con variaciones en altura (Y) para verificar el 3D
+    const demoPath3D = [
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(4, 0, 0),
+      new THREE.Vector3(4, 1.2, -3), // Con elevación en Y
+      new THREE.Vector3(1, 0.8, -3),
+      new THREE.Vector3(0, 0, -5)
+    ];
+    let simIdx = 0;
+
+    document.getElementById('btnAdd').addEventListener('click', () => {
+      if (isClosed) return;
+
+      if (simIdx < demoPath3D.length) {
+        points.push(demoPath3D[simIdx++].clone());
+      } else {
+        const last = points[points.length - 1];
+        // Generar siguiente punto aleatorio en espacio 3D
+        const newPt = new THREE.Vector3(
+          last.x + (Math.random() - 0.3) * 2,
+          last.y + (Math.random() - 0.5) * 0.5, // Altura ligera
+          last.z + (Math.random() - 0.3) * 2
+        );
+        points.push(newPt);
+      }
+
+      updateMetrics();
+      update3DScene();
+
+      // Ajustar automáticamente el foco de la cámara al centro del plano medido
+      if (points.length > 0) {
+        const center = new THREE.Vector3();
+        points.forEach(p => center.add(p));
+        center.divideScalar(points.length);
+        controls.target.copy(center);
+      }
+    });
+
+    document.getElementById('btnClose').addEventListener('click', () => {
+      if (points.length < 3) return;
+      isClosed = true;
+      updateMetrics();
+      update3DScene();
+    });
+
+    document.getElementById('btnClear').addEventListener('click', () => {
+      points.length = 0;
+      isClosed = false;
+      simIdx = 0;
+      controls.target.set(0, 0, 0);
+      updateMetrics();
+      update3DScene();
+    });
+
+    // --- BUCLE DE ANIMACIÓN Y REDIMENSIONADO ---
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update(); // Mantiene la inercia del movimiento de la cámara
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
