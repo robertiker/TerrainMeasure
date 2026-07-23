@@ -53,7 +53,7 @@ document.getElementById('app-favicon').href = highResLogo;
 document.getElementById('apple-icon').href = highResLogo;
 
 // --- ESTADO GLOBAL Y MODOS ---
-let currentMode = 'polygon'; // 'polygon', 'distance', 'elevation'
+let currentMode = 'polygon';
 const points = [];
 const innerPoints = [];
 let selectedIndex = -1;
@@ -66,6 +66,7 @@ const mouse = new THREE.Vector2();
 // --- GESTIÓN DE MODOS ---
 const modeButtons = document.querySelectorAll('.mode-btn');
 const welcomeModal = document.getElementById('welcome-modal');
+const infoModal = document.getElementById('info-modal');
 const modeTag = document.getElementById('mode-tag');
 
 modeButtons.forEach(btn => {
@@ -78,6 +79,15 @@ modeButtons.forEach(btn => {
 
 document.getElementById('btnChangeMode').addEventListener('click', () => {
   welcomeModal.style.display = 'flex';
+});
+
+document.getElementById('btn-info').addEventListener('click', () => {
+  renderInfoModal();
+  infoModal.style.display = 'flex';
+});
+
+document.getElementById('btnCloseInfo').addEventListener('click', () => {
+  infoModal.style.display = 'none';
 });
 
 function setMeasurementMode(mode) {
@@ -265,7 +275,7 @@ function isPointInPolygon(pt, polygon) {
   return inside;
 }
 
-// --- DIBUJADO DE LA ESCENA SEGÚN EL MODO ---
+// --- RENDERIZADO DE LA ESCENA ---
 function update3DScene() {
   lineGroup.clear(); nodeGroup.clear(); projectionGroup.clear();
 
@@ -276,10 +286,9 @@ function update3DScene() {
 
   const sphereGeo = new THREE.SphereGeometry(0.12, 16, 16);
 
-  // DIBUJAR PUNTOS / NODOS
   points.forEach((p, index) => {
     let color = 0x2196f3;
-    if (currentMode === 'elevation') color = 0x9c27b0; // Púrpura para modo elevación
+    if (currentMode === 'elevation') color = 0x9c27b0;
     let scale = (selectedType === 'outer' && index === selectedIndex) ? (color = 0xff9800, 1.5) : 1.0;
     if (index === 0) color = 0xf44336;
 
@@ -290,7 +299,6 @@ function update3DScene() {
     sphere.userData = { pointIndex: index, type: 'outer' };
     nodeGroup.add(sphere);
 
-    // Plomada vertical
     const dropPoints = [p.clone(), new THREE.Vector3(p.x, 0, p.z)];
     const dropGeo = new THREE.BufferGeometry().setFromPoints(dropPoints);
     const dropMat = new THREE.LineDashedMaterial({ color: 0x888888, dashSize: 0.1, gapSize: 0.1 });
@@ -318,7 +326,6 @@ function update3DScene() {
     projectionGroup.add(dropLine);
   });
 
-  // DIBUJAR LÍNEAS 3D (TRAMOS O PERÍMETRO)
   if (points.length > 1) {
     const linePoints = [...points];
     if (isClosed && currentMode === 'polygon') linePoints.push(points[0]);
@@ -331,7 +338,6 @@ function update3DScene() {
     lineGroup.add(new THREE.Line(lineGeo, lineMat));
   }
 
-  // SOLO MODO PLANO/TERRENO: Generar Malla Unificada Delaunay
   if (currentMode === 'polygon' && isClosed && points.length >= 3) {
     const shape2D = new THREE.Shape();
     shape2D.moveTo(points[0].x, points[0].z);
@@ -378,7 +384,182 @@ function update3DScene() {
   }
 }
 
-// --- ACTUALIZACIÓN DE MÉTRICAS SEGÚN MODO ---
+// --- RENDERING DEL MODAL INFORMATIVO "i" ---
+function renderInfoModal() {
+  const title = document.getElementById('info-title');
+  const statsContainer = document.getElementById('info-stats-container');
+  const pCanvas = document.getElementById('previewCanvas');
+  const ctx = pCanvas.getContext('2d');
+
+  pCanvas.width = pCanvas.clientWidth * 2;
+  pCanvas.height = pCanvas.clientHeight * 2;
+  ctx.clearRect(0, 0, pCanvas.width, pCanvas.height);
+
+  if (currentMode === 'polygon') {
+    title.innerText = 'Informe de Plano / Terreno';
+
+    // 1. Dibujar Croquis 2D en Planta
+    if (points.length > 0) {
+      draw2DPlanPreview(ctx, pCanvas.width, pCanvas.height);
+    }
+
+    // 2. Calcular Área y Volumen Estimado
+    let area = 0;
+    if (isClosed && points.length >= 3) {
+      for (let i = 0; i < points.length; i++) {
+        const p1 = points[i], p2 = points[(i + 1) % points.length];
+        area += (p1.x * p2.z) - (p2.x * p1.z);
+      }
+      area = Math.abs(area) / 2;
+    }
+
+    let perim3D = 0;
+    for (let i = 1; i < points.length; i++) perim3D += points[i].distanceTo(points[i - 1]);
+    if (isClosed && points.length > 2) perim3D += points[points.length - 1].distanceTo(points[0]);
+
+    let perim2D = 0;
+    for (let i = 1; i < points.length; i++) {
+      perim2D += Math.hypot(points[i].x - points[i-1].x, points[i].z - points[i-1].z);
+    }
+    if (isClosed && points.length > 2) {
+      perim2D += Math.hypot(points[points.length-1].x - points[0].x, points[points.length-1].z - points[0].z);
+    }
+
+    const avgY = points.length > 0 ? (points.reduce((acc, p) => acc + p.y, 0) / points.length) : 0;
+    const volumeEst = area * Math.abs(avgY > 0 ? avgY : 0.2); // Estimación de volumen de masa m³
+
+    statsContainer.innerHTML = `
+      <div class="stat-box"><label>Área Planta</label><span>${area.toFixed(2)} m²</span></div>
+      <div class="stat-box"><label>Volumen Est.</label><span>${volumeEst.toFixed(2)} m³</span></div>
+      <div class="stat-box"><label>Perímetro 3D</label><span>${perim3D.toFixed(2)} m</span></div>
+      <div class="stat-box"><label>Perímetro 2D</label><span>${perim2D.toFixed(2)} m</span></div>
+      <div class="stat-box"><label>Puntos Ext</label><span>${points.length} pts</span></div>
+      <div class="stat-box"><label>Puntos Int</label><span>${innerPoints.length} pts</span></div>
+    `;
+  }
+  else if (currentMode === 'distance') {
+    title.innerText = 'Informe de Distancias Lineales';
+    drawDistancePreview(ctx, pCanvas.width, pCanvas.height);
+
+    let totalDist = 0;
+    for (let i = 1; i < points.length; i++) totalDist += points[i].distanceTo(points[i - 1]);
+
+    let directDist = points.length > 1 ? points[0].distanceTo(points[points.length - 1]) : 0;
+
+    statsContainer.innerHTML = `
+      <div class="stat-box"><label>Dist. Acumulada</label><span>${totalDist.toFixed(2)} m</span></div>
+      <div class="stat-box"><label>Dist. Directa A-B</label><span>${directDist.toFixed(2)} m</span></div>
+      <div class="stat-box"><label>Número Tramos</label><span>${points.length > 1 ? points.length - 1 : 0}</span></div>
+      <div class="stat-box"><label>Puntos Clicados</label><span>${points.length}</span></div>
+    `;
+  }
+  else if (currentMode === 'elevation') {
+    title.innerText = 'Perfil Altimétrico (Elevación)';
+    drawElevationPreview(ctx, pCanvas.width, pCanvas.height);
+
+    let deltaY = points.length > 1 ? points[points.length - 1].y - points[0].y : 0;
+    let maxY = points.length > 0 ? Math.max(...points.map(p => p.y)) : 0;
+    let minY = points.length > 0 ? Math.min(...points.map(p => p.y)) : 0;
+
+    statsContainer.innerHTML = `
+      <div class="stat-box"><label>Desnivel Total ΔY</label><span>${(deltaY >= 0 ? '+' : '') + deltaY.toFixed(2)} m</span></div>
+      <div class="stat-box"><label>Cota Máxima</label><span>${maxY.toFixed(2)} m</span></div>
+      <div class="stat-box"><label>Cota Mínima</label><span>${minY.toFixed(2)} m</span></div>
+      <div class="stat-box"><label>Cotas Medidas</label><span>${points.length}</span></div>
+    `;
+  }
+}
+
+// Dibujar Croquis 2D Planta
+function draw2DPlanPreview(ctx, w, h) {
+  const all = [...points, ...innerPoints];
+  let minX = Math.min(...all.map(p=>p.x)), maxX = Math.max(...all.map(p=>p.x));
+  let minZ = Math.min(...all.map(p=>p.z)), maxZ = Math.max(...all.map(p=>p.z));
+
+  const pad = 40;
+  const scaleX = (w - pad * 2) / ((maxX - minX) || 1);
+  const scaleZ = (h - pad * 2) / ((maxZ - minZ) || 1);
+  const scale = Math.min(scaleX, scaleZ);
+
+  const toScreen = (p) => ({
+    x: w/2 + (p.x - (minX+maxX)/2) * scale,
+    y: h/2 + (p.z - (minZ+maxZ)/2) * scale
+  });
+
+  // Rejilla de fondo
+  ctx.strokeStyle = '#222'; ctx.lineWidth = 1;
+  for(let x=0; x<w; x+=30) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); }
+  for(let y=0; y<h; y+=30) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
+
+  // Polígono Planta
+  if (points.length > 1) {
+    ctx.beginPath();
+    const p0 = toScreen(points[0]);
+    ctx.moveTo(p0.x, p0.y);
+    for(let i=1; i<points.length; i++) {
+      const pt = toScreen(points[i]);
+      ctx.lineTo(pt.x, pt.y);
+    }
+    if (isClosed) ctx.closePath();
+    ctx.fillStyle = 'rgba(0, 230, 118, 0.25)';
+    ctx.fill();
+    ctx.strokeStyle = '#00e676'; ctx.lineWidth = 4;
+    ctx.stroke();
+  }
+
+  // Puntos
+  points.forEach((p, i) => {
+    const pt = toScreen(p);
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, 6, 0, Math.PI*2);
+    ctx.fillStyle = i===0 ? '#f44336' : '#2196f3'; ctx.fill();
+  });
+
+  innerPoints.forEach((p) => {
+    const pt = toScreen(p);
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, 5, 0, Math.PI*2);
+    ctx.fillStyle = '#ff9800'; ctx.fill();
+  });
+}
+
+// Dibujar Perfil Altimétrico
+function drawElevationPreview(ctx, w, h) {
+  if (points.length < 2) return;
+
+  const pad = 40;
+  let distances = [0];
+  let acc = 0;
+  for(let i=1; i<points.length; i++) {
+    acc += Math.hypot(points[i].x - points[i-1].x, points[i].z - points[i-1].z);
+    distances.push(acc);
+  }
+
+  let minY = Math.min(...points.map(p=>p.y)), maxY = Math.max(...points.map(p=>p.y));
+  let maxD = distances[distances.length-1];
+
+  const scaleX = (w - pad * 2) / (maxD || 1);
+  const scaleY = (h - pad * 2) / ((maxY - minY) || 1);
+
+  ctx.beginPath();
+  points.forEach((p, i) => {
+    const sx = pad + distances[i] * scaleX;
+    const sy = h - pad - (p.y - minY) * scaleY;
+    if (i === 0) ctx.moveTo(sx, sy);
+    else ctx.lineTo(sx, sy);
+  });
+  ctx.strokeStyle = '#9c27b0'; ctx.lineWidth = 4; ctx.stroke();
+
+  // Relleno degradado de cota
+  ctx.lineTo(w - pad, h - pad);
+  ctx.lineTo(pad, h - pad);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(156, 39, 176, 0.2)';
+  ctx.fill();
+}
+
+function drawDistancePreview(ctx, w, h) {
+  draw2DPlanPreview(ctx, w, h);
+}
+
 function updateMetrics() {
   document.getElementById('btnClose').disabled = currentMode !== 'polygon' || points.length < 3 || isClosed;
   document.getElementById('btnAddManual').disabled = currentMode !== 'polygon' || !isClosed;
@@ -486,7 +667,8 @@ function onPointerDown(event) {
       event.target.closest('#app-header') ||
       event.target.closest('#nav-widget') ||
       event.target.closest('#controls-wrapper') ||
-      event.target.closest('#welcome-modal')) return;
+      event.target.closest('#welcome-modal') ||
+      event.target.closest('#info-modal')) return;
 
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
@@ -538,7 +720,6 @@ document.getElementById('btnDeselectPoint').addEventListener('click', () => {
   update3DScene();
 });
 
-// SIMULACIÓN DE RECEPCIÓN DE DATOS IMU 9 EJES
 const demoPath3D = [
   new THREE.Vector3(0, 0, 0),
   new THREE.Vector3(4, 0.8, 0),
@@ -595,7 +776,6 @@ document.getElementById('btnClear').addEventListener('click', () => {
   update3DScene();
 });
 
-// ANIMACIÓN
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
