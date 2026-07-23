@@ -68,7 +68,7 @@ const welcomeModal = document.getElementById('welcome-modal');
 const infoModal = document.getElementById('info-modal');
 const modeTag = document.getElementById('mode-tag');
 
-// --- 3. EVENTOS DEL MODAL INICIAL (DIRECTOS SIN RACE CONDITION) ---
+// --- 3. EVENTOS DEL MODAL INICIAL ---
 document.querySelectorAll('.mode-btn').forEach(btn => {
   btn.addEventListener('click', (e) => {
     const targetBtn = e.target.closest('.mode-btn');
@@ -387,33 +387,24 @@ function update3DScene() {
   }
 }
 
-// --- 7. RENDER DEL GRÁFICO Y DATOS EN EL MODAL "i" ---
+// --- 7. RENDER DEL GRÁFICO DIÉDRICO 3D Y DATOS EN EL MODAL "i" ---
+let infoRenderer = null;
+let infoScene = null;
+let infoCamera = null;
+
 function renderInfoModal() {
   const title = document.getElementById('info-title');
   const statsContainer = document.getElementById('info-stats-container');
   const pCanvas = document.getElementById('previewCanvas');
-  const ctx = pCanvas.getContext('2d');
-
-  const rect = pCanvas.getBoundingClientRect();
-  pCanvas.width = (rect.width || 400) * 2;
-  pCanvas.height = (rect.height || 220) * 2;
-  const w = pCanvas.width;
-  const h = pCanvas.height;
-
-  ctx.clearRect(0, 0, w, h);
 
   if (points.length === 0) {
-    ctx.fillStyle = '#666';
-    ctx.font = '30px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Sin datos de medición aún', w / 2, h / 2);
     statsContainer.innerHTML = `<div class="stat-box" style="grid-column: span 2;"><label>Estado</label><span>Añade puntos para ver el informe</span></div>`;
     return;
   }
 
   if (currentMode === 'polygon') {
-    title.innerText = 'Informe de Plano / Terreno';
-    draw2DPlanPreview(ctx, w, h);
+    title.innerText = 'Perspectiva Diédrica Topográfica';
+    drawDihedral3DPreview(pCanvas);
 
     let area = 0;
     if (isClosed && points.length >= 3) {
@@ -446,7 +437,7 @@ function renderInfoModal() {
   }
   else if (currentMode === 'distance') {
     title.innerText = 'Informe de Distancias Lineales';
-    draw2DPlanPreview(ctx, w, h);
+    drawDihedral3DPreview(pCanvas);
 
     let totalDist = 0;
     for (let i = 1; i < points.length; i++) totalDist += points[i].distanceTo(points[i - 1]);
@@ -461,7 +452,7 @@ function renderInfoModal() {
   }
   else if (currentMode === 'elevation') {
     title.innerText = 'Perfil Altimétrico (Elevación)';
-    drawElevationPreview(ctx, w, h);
+    drawElevationPreview2D(pCanvas);
 
     let deltaY = points.length > 1 ? points[points.length - 1].y - points[0].y : 0;
     let maxY = Math.max(...points.map(p => p.y));
@@ -476,57 +467,166 @@ function renderInfoModal() {
   }
 }
 
-function draw2DPlanPreview(ctx, w, h) {
-  const all = [...points, ...innerPoints];
-  let minX = Math.min(...all.map(p=>p.x)), maxX = Math.max(...all.map(p=>p.x));
-  let minZ = Math.min(...all.map(p=>p.z)), maxZ = Math.max(...all.map(p=>p.z));
+// --- DIBUJAR PERSPECTIVA DIÉDRICA 3D TOPOGRÁFICA (BLOQUE CON MAPA DE CALOR Y FALDES GRISES) ---
+function drawDihedral3DPreview(canvasEl) {
+  const width = canvasEl.clientWidth || 400;
+  const height = 220;
 
-  const pad = 50;
-  const rangeX = (maxX - minX) || 1;
-  const rangeZ = (maxZ - minZ) || 1;
-  const scale = Math.min((w - pad * 2) / rangeX, (h - pad * 2) / rangeZ);
+  if (!infoRenderer) {
+    infoRenderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true, alpha: true });
+  }
+  infoRenderer.setSize(width, height);
+  infoRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-  const toScreen = (p) => ({
-    x: w / 2 + (p.x - (minX + maxX) / 2) * scale,
-    y: h / 2 + (p.z - (minZ + maxZ) / 2) * scale
-  });
+  infoScene = new THREE.Scene();
+  infoScene.background = new THREE.Color(0x181818);
 
-  ctx.strokeStyle = '#222'; ctx.lineWidth = 1;
-  for(let x = 0; x < w; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
-  for(let y = 0; y < h; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+  // Cámara Isométrica / Diédrica Axonométrica
+  const aspect = width / height;
+  const d = 8;
+  infoCamera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 0.1, 1000);
+  infoCamera.position.set(10, 12, 10);
+  infoCamera.lookAt(0, 0, 0);
 
-  if (points.length > 1) {
-    ctx.beginPath();
-    const p0 = toScreen(points[0]);
-    ctx.moveTo(p0.x, p0.y);
-    for(let i = 1; i < points.length; i++) {
-      const pt = toScreen(points[i]);
-      ctx.lineTo(pt.x, pt.y);
-    }
-    if (isClosed && currentMode === 'polygon') ctx.closePath();
+  // Rejilla de Plano Diédrico
+  const grid = new THREE.GridHelper(16, 16, 0x888888, 0x333333);
+  grid.position.y = -0.01;
+  infoScene.add(grid);
 
-    ctx.fillStyle = 'rgba(0, 230, 118, 0.25)';
-    ctx.fill();
-    ctx.strokeStyle = '#00e676'; ctx.lineWidth = 4;
-    ctx.stroke();
+  infoScene.add(new THREE.AmbientLight(0xffffff, 0.8));
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+  dirLight.position.set(5, 10, 7);
+  infoScene.add(dirLight);
+
+  if (points.length < 3 || !isClosed) return;
+
+  const allPoints = [...points, ...innerPoints];
+  const coords2D = allPoints.map(p => [p.x, p.z]);
+  const delaunay = Delaunay.from(coords2D);
+  const rawTriangles = delaunay.triangles;
+
+  const validIndices = [];
+  for (let i = 0; i < rawTriangles.length; i += 3) {
+    const ia = rawTriangles[i], ib = rawTriangles[i+1], ic = rawTriangles[i+2];
+    const pa = allPoints[ia], pb = allPoints[ib], pc = allPoints[ic];
+    const cx = (pa.x + pb.x + pc.x) / 3;
+    const cz = (pa.z + pb.z + pc.z) / 3;
+
+    if (isPointInPolygon([cx, cz], points)) validIndices.push(ia, ib, ic);
   }
 
-  points.forEach((p, i) => {
-    const pt = toScreen(p);
-    ctx.beginPath(); ctx.arc(pt.x, pt.y, 8, 0, Math.PI * 2);
-    ctx.fillStyle = i === 0 ? '#f44336' : '#2196f3'; ctx.fill();
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+  // 1. CALCULAR RANGO DE ALTURAS PARA MAPA DE CALOR (Azul -> Verde -> Amarillo -> Rojo)
+  let minY = Math.min(...allPoints.map(p => p.y));
+  let maxY = Math.max(...allPoints.map(p => p.y));
+  const rangeY = (maxY - minY) || 1;
+
+  function getHeatmapColor(y) {
+    const t = (y - minY) / rangeY;
+    const color = new THREE.Color();
+    if (t < 0.33) {
+      color.setHSL(0.66 - (t / 0.33) * 0.33, 1, 0.5); // Azul a Verde
+    } else if (t < 0.66) {
+      color.setHSL(0.33 - ((t - 0.33) / 0.33) * 0.16, 1, 0.5); // Verde a Amarillo
+    } else {
+      color.setHSL(0.17 - ((t - 0.66) / 0.34) * 0.17, 1, 0.5); // Amarillo a Rojo
+    }
+    return color;
+  }
+
+  // 2. CONSTRUIR MALLA SUPERIOR CON COLOR DE VÉRTICE (MAPA DE CALOR)
+  const vertices = [];
+  const colors = [];
+
+  allPoints.forEach(p => {
+    vertices.push(p.x, p.y, p.z);
+    const c = getHeatmapColor(p.y);
+    colors.push(c.r, c.g, c.b);
   });
 
-  innerPoints.forEach((p) => {
-    const pt = toScreen(p);
-    ctx.beginPath(); ctx.arc(pt.x, pt.y, 7, 0, Math.PI * 2);
-    ctx.fillStyle = '#ff9800'; ctx.fill();
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+  const topGeo = new THREE.BufferGeometry();
+  topGeo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+  topGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  topGeo.setIndex(validIndices);
+  topGeo.computeVertexNormals();
+
+  const topMat = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    side: THREE.DoubleSide,
+    roughness: 0.4
   });
+  const topMesh = new THREE.Mesh(topGeo, topMat);
+
+  // Malla Alámbrica Negra Superior
+  const wireframeGeo = new THREE.WireframeGeometry(topGeo);
+  const wireframeMat = new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 1.5 });
+  const wireframeMesh = new THREE.LineSegments(wireframeGeo, wireframeMat);
+  topMesh.add(wireframeMesh);
+
+  infoScene.add(topMesh);
+
+  // 3. FALDES/PAREDES LATERALES GRISES DIÉDRICAS (Paredes desde cota hasta el suelo Y=0)
+  const sideVertices = [];
+  const sideIndices = [];
+  let sIdx = 0;
+
+  for (let i = 0; i < points.length; i++) {
+    const nextI = (i + 1) % points.length;
+    const p1 = points[i];
+    const p2 = points[nextI];
+
+    // 4 vértices del cuadrilátero lateral
+    sideVertices.push(p1.x, p1.y, p1.z); // Superior 1
+    sideVertices.push(p2.x, p2.y, p2.z); // Superior 2
+    sideVertices.push(p1.x, 0, p1.z);    // Base 1
+    sideVertices.push(p2.x, 0, p2.z);    // Base 2
+
+    sideIndices.push(sIdx, sIdx + 2, sIdx + 1);
+    sideIndices.push(sIdx + 1, sIdx + 2, sIdx + 3);
+
+    sIdx += 4;
+  }
+
+  const sideGeo = new THREE.BufferGeometry();
+  sideGeo.setAttribute('position', new THREE.Float32BufferAttribute(sideVertices, 3));
+  sideGeo.setIndex(sideIndices);
+  sideGeo.computeVertexNormals();
+
+  const sideMat = new THREE.MeshStandardMaterial({
+    color: 0xaaaaaa,
+    side: THREE.DoubleSide,
+    roughness: 0.6
+  });
+  const sideMesh = new THREE.Mesh(sideGeo, sideMat);
+
+  // Bordes negros de los faldones verticales
+  const sideWireGeo = new THREE.WireframeGeometry(sideGeo);
+  const sideWireMesh = new THREE.LineSegments(sideWireGeo, wireframeMat);
+  sideMesh.add(sideWireMesh);
+
+  infoScene.add(sideMesh);
+
+  // Centrar la cámara en el objeto
+  const center = new THREE.Vector3();
+  allPoints.forEach(p => center.add(p));
+  center.divideScalar(allPoints.length);
+
+  infoCamera.lookAt(center);
+  infoCamera.position.set(center.x + 8, center.y + 10, center.z + 8);
+
+  infoRenderer.render(infoScene, infoCamera);
 }
 
-function drawElevationPreview(ctx, w, h) {
+// Dibujar Perfil Altimétrico (Elevación)
+function drawElevationPreview2D(canvasEl) {
+  const ctx = canvasEl.getContext('2d');
+  const rect = canvasEl.getBoundingClientRect();
+  canvasEl.width = (rect.width || 400) * 2;
+  canvasEl.height = 220 * 2;
+  const w = canvasEl.width;
+  const h = canvasEl.height;
+
+  ctx.clearRect(0, 0, w, h);
+
   const pad = 50;
   let distances = [0];
   let acc = 0;
@@ -573,7 +673,6 @@ function drawElevationPreview(ctx, w, h) {
   });
 }
 
-// --- 8. ACTUALIZACIÓN DE MÉTRICAS ---
 function updateMetrics() {
   document.getElementById('btnClose').disabled = currentMode !== 'polygon' || points.length < 3 || isClosed;
   document.getElementById('btnAddManual').disabled = currentMode !== 'polygon' || !isClosed;
@@ -634,7 +733,7 @@ function updateMetrics() {
   }
 }
 
-// --- 9. EXPORTAR A DXF ---
+// --- 8. EXPORTAR A DXF ---
 function generateDXF(perimeterPts, innerPts, closed) {
   let dxf = [];
   dxf.push("0", "SECTION", "2", "HEADER", "0", "ENDSEC");
@@ -674,7 +773,7 @@ document.getElementById('btnExportDXF').addEventListener('click', () => {
   URL.revokeObjectURL(link.href);
 });
 
-// --- 10. INTERACCIÓN Y EVENTOS DE SELECCIÓN ---
+// --- 9. INTERACCIÓN Y EVENTOS DE SELECCIÓN ---
 function onPointerDown(event) {
   if (event.target.tagName === 'BUTTON' || 
       event.target.closest('#metrics') || 
