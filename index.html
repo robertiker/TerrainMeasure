@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>GeoMeasure 3D</title>
+  <title>GeoMeasure 3D - Malla de Terreno Unificada</title>
 
   <!-- PWA & Favicon Config -->
   <link rel="icon" type="image/png" id="app-favicon" href="">
@@ -35,7 +35,6 @@
       box-sizing: border-box;
     }
     
-    /* Header con Logo e Identidad Visual */
     #app-header {
       pointer-events: auto;
       padding: 10px 16px;
@@ -149,6 +148,7 @@
     button:active { opacity: 0.7; }
     .btn-sim { background: #2196f3; color: #fff; }
     .btn-close { background: #00e676; color: #000; }
+    .btn-manual { background: #ff9800; color: #000; }
     .btn-export { background: #9c27b0; color: #fff; }
     .btn-delete { background: #e91e63; color: #fff; }
     .btn-cancel { background: #666; color: #fff; }
@@ -157,11 +157,13 @@
     #canvas3d { width: 100vw; height: 100vh; display: block; }
   </style>
 
+  <!-- Import Map incluyendo Three.js y D3-Delaunay -->
   <script type="importmap">
     {
       "imports": {
         "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+        "d3-delaunay": "https://cdn.jsdelivr.net/npm/d3-delaunay@6/+esm"
       }
     }
   </script>
@@ -176,7 +178,8 @@
       </div>
 
       <div id="metrics">
-        <div class="metric">Puntos: <span id="lbl-pts">0</span></div>
+        <div class="metric">Perímetro: <span id="lbl-pts">0 pts</span></div>
+        <div class="metric">Internos: <span id="lbl-inner-pts">0 pts</span></div>
         <div class="metric">Perímetro 3D: <span id="lbl-per">0.00 m</span></div>
         <div class="metric">Área Planta: <span id="lbl-area">-- m²</span></div>
       </div>
@@ -188,7 +191,7 @@
     </div>
 
     <div id="selection-card">
-      <span id="lbl-selected-info">Punto #1 seleccionado</span>
+      <span id="lbl-selected-info">Punto seleccionado</span>
       <div style="display: flex; gap: 8px;">
         <button class="btn-delete" id="btnDeletePoint">Borrar Punto</button>
         <button class="btn-cancel" id="btnDeselectPoint">Cancelar</button>
@@ -196,8 +199,9 @@
     </div>
 
     <div id="controls">
-      <button class="btn-sim" id="btnAdd">+ Añadir Punto 3D</button>
+      <button class="btn-sim" id="btnAdd">+ Perímetro 3D</button>
       <button class="btn-close" id="btnClose" disabled>Cerrar Plano</button>
+      <button class="btn-manual" id="btnAddManual" disabled>📍 Punto Manual</button>
       <button class="btn-export" id="btnExportDXF" disabled>💾 Exportar DXF</button>
       <button class="btn-clear" id="btnClear">Limpiar</button>
     </div>
@@ -208,121 +212,50 @@
   <script type="module">
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { Delaunay } from 'd3-delaunay';
 
-    // --- GENERADOR DEL LOGO / ICONO FIDELIDAD HD ---
+    // --- LOGO HD ---
     function buildDetailedLogo() {
       const c = document.createElement('canvas');
-      c.width = 256;
-      c.height = 256;
+      c.width = 256; c.height = 256;
       const ctx = c.getContext('2d');
-
-      // 1. Marco iOS redondeado azul con degradado
       const bgGrad = ctx.createLinearGradient(0, 0, 256, 256);
-      bgGrad.addColorStop(0, '#42a5f5');
-      bgGrad.addColorStop(1, '#1565c0');
-      
-      ctx.beginPath();
-      ctx.roundRect(0, 0, 256, 256, 56);
-      ctx.fillStyle = bgGrad;
-      ctx.fill();
+      bgGrad.addColorStop(0, '#42a5f5'); bgGrad.addColorStop(1, '#1565c0');
+      ctx.beginPath(); ctx.roundRect(0, 0, 256, 256, 56); ctx.fillStyle = bgGrad; ctx.fill();
 
-      // 2. Círculo de Radar Central
       const radarGrad = ctx.createRadialGradient(128, 128, 10, 128, 128, 90);
-      radarGrad.addColorStop(0, '#0d47a1');
-      radarGrad.addColorStop(1, '#0a2463');
+      radarGrad.addColorStop(0, '#0d47a1'); radarGrad.addColorStop(1, '#0a2463');
+      ctx.beginPath(); ctx.arc(128, 128, 92, 0, Math.PI * 2); ctx.fillStyle = radarGrad; ctx.fill();
+      ctx.strokeStyle = '#1e88e5'; ctx.lineWidth = 3; ctx.stroke();
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)'; ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.arc(128, 128, 92, 0, Math.PI * 2);
-      ctx.fillStyle = radarGrad;
-      ctx.fill();
-      ctx.strokeStyle = '#1e88e5';
-      ctx.lineWidth = 3;
+      ctx.arc(128, 128, 60, 0, Math.PI * 2); ctx.arc(128, 128, 30, 0, Math.PI * 2);
+      ctx.moveTo(128, 36); ctx.lineTo(128, 220); ctx.moveTo(36, 128); ctx.lineTo(220, 128);
       ctx.stroke();
 
-      // Anillos y cuadrícula del radar
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(128, 128, 60, 0, Math.PI * 2);
-      ctx.arc(128, 128, 30, 0, Math.PI * 2);
-      ctx.moveTo(128, 36); ctx.lineTo(128, 220);
-      ctx.moveTo(36, 128); ctx.lineTo(220, 128);
-      ctx.stroke();
-
-      // 3. Polígono Verde Brillante (Plano medido)
-      ctx.save();
       const polyGrad = ctx.createLinearGradient(80, 80, 180, 180);
-      polyGrad.addColorStop(0, '#76ff03');
-      polyGrad.addColorStop(1, '#00c853');
-
+      polyGrad.addColorStop(0, '#76ff03'); polyGrad.addColorStop(1, '#00c853');
       ctx.beginPath();
-      ctx.moveTo(120, 75);
-      ctx.lineTo(170, 85);
-      ctx.lineTo(150, 165);
-      ctx.lineTo(85, 175);
-      ctx.lineTo(100, 130);
-      ctx.lineTo(135, 120);
-      ctx.closePath();
+      ctx.moveTo(120, 75); ctx.lineTo(170, 85); ctx.lineTo(150, 165);
+      ctx.lineTo(85, 175); ctx.lineTo(100, 130); ctx.lineTo(135, 120);
+      ctx.closePath(); ctx.fillStyle = polyGrad; ctx.fill();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 5; ctx.stroke();
 
-      ctx.fillStyle = polyGrad;
-      ctx.fill();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 5;
-      ctx.stroke();
-      ctx.restore();
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(100, 80, 14, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#76ff03'; ctx.beginPath(); ctx.arc(100, 80, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(110, 82, 16, 8);
 
-      // 4. Cinta Métrica blanca (Esquina superior izquierda)
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2.5; ctx.beginPath();
+      ctx.moveTo(178, 85); ctx.lineTo(158, 165); ctx.stroke();
+
       ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.arc(100, 80, 14, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#76ff03';
-      ctx.beginPath();
-      ctx.arc(100, 80, 6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(110, 82, 16, 8);
-
-      // 5. Cota Lateral con regla
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.moveTo(178, 85);
-      ctx.lineTo(158, 165);
-      ctx.stroke();
-
-      // Nodos de cota
-      ctx.fillStyle = '#ffffff';
-      [ {x:178, y:85}, {x:168, y:125}, {x:158, y:165} ].forEach(pt => {
-        ctx.beginPath();
-        ctx.arc(pt.x, pt.y, 4.5, 0, Math.PI * 2);
-        ctx.fill();
+      [{x:178, y:85}, {x:168, y:125}, {x:158, y:165}].forEach(pt => {
+        ctx.beginPath(); ctx.arc(pt.x, pt.y, 4.5, 0, Math.PI * 2); ctx.fill();
       });
 
-      // 6. Etiqueta Flotante (4.2 KM²)
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.roundRect(165, 115, 62, 22, 6);
-      ctx.fill();
-      ctx.strokeStyle = '#1565c0';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
-      ctx.fillStyle = '#0d47a1';
-      ctx.font = 'Bold 10px system-ui, sans-serif';
-      ctx.fillText('4.2 KM²', 173, 130);
-
-      // 7. Flecha de Norte
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'Bold 10px system-ui, sans-serif';
-      ctx.fillText('N°', 124, 202);
-      ctx.beginPath();
-      ctx.moveTo(128, 205);
-      ctx.lineTo(122, 218);
-      ctx.lineTo(128, 214);
-      ctx.lineTo(134, 218);
-      ctx.closePath();
-      ctx.fill();
-
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.roundRect(165, 115, 62, 22, 6); ctx.fill();
+      ctx.fillStyle = '#0d47a1'; ctx.font = 'Bold 10px system-ui, sans-serif'; ctx.fillText('4.2 KM²', 173, 130);
       return c.toDataURL('image/png');
     }
 
@@ -333,7 +266,9 @@
 
     // --- ESTADO GLOBAL ---
     const points = [];
+    const innerPoints = [];
     let selectedIndex = -1;
+    let selectedType = 'outer';
     let isClosed = false;
 
     const raycaster = new THREE.Raycaster();
@@ -355,9 +290,7 @@
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
 
-    const gridHelper = new THREE.GridHelper(20, 20, 0x444444, 0x222222);
-    scene.add(gridHelper);
-
+    scene.add(new THREE.GridHelper(20, 20, 0x444444, 0x222222));
     scene.add(new THREE.AmbientLight(0xffffff, 0.7));
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
     dirLight.position.set(10, 20, 10);
@@ -387,18 +320,12 @@
 
     function createCubeFaceTexture(text) {
       const canvasText = document.createElement('canvas');
-      canvasText.width = 128;
-      canvasText.height = 128;
+      canvasText.width = 128; canvasText.height = 128;
       const ctx = canvasText.getContext('2d');
-      ctx.fillStyle = '#3a3a3a';
-      ctx.fillRect(0, 0, 128, 128);
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 6;
-      ctx.strokeRect(0, 0, 128, 128);
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'Bold 20px system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#3a3a3a'; ctx.fillRect(0, 0, 128, 128);
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 6; ctx.strokeRect(0, 0, 128, 128);
+      ctx.fillStyle = '#ffffff'; ctx.font = 'Bold 20px system-ui, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(text, 64, 64);
       return new THREE.CanvasTexture(canvasText);
     }
@@ -439,11 +366,9 @@
         const rotateSpeed = 0.008;
         const offset = camera.position.clone().sub(controls.target);
         let spherical = new THREE.Spherical().setFromVector3(offset);
-
         spherical.theta -= deltaX * rotateSpeed;
         spherical.phi -= deltaY * rotateSpeed;
         spherical.phi = Math.max(0.01, Math.min(Math.PI - 0.01, spherical.phi));
-
         offset.setFromSpherical(spherical);
         camera.position.copy(controls.target).add(offset);
         controls.update();
@@ -487,7 +412,21 @@
 
     document.getElementById('btn-home').addEventListener('click', () => setCameraView('top'));
 
-    // --- 4. RENDERIZADO DE LA ESCENA ---
+    // --- 4. ALGORITMO PUNTO EN POLÍGONO (Para Filtrar Triángulos Internos) ---
+    function isPointInPolygon(pt, polygon) {
+      const x = pt[0], z = pt[1];
+      let inside = false;
+      for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+        const xi = polygon[i].x, zi = polygon[i].z;
+        const xj = polygon[j].x, zj = polygon[j].z;
+        const intersect = ((zi > z) !== (zj > z)) &&
+            (x < (xj - xi) * (z - zi) / (zj - zi) + xi);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
+
+    // --- 5. RENDERIZADO DE LA ESCENA CON DELAUNAY UNIFICADO ---
     function update3DScene() {
       lineGroup.clear();
       nodeGroup.clear();
@@ -509,157 +448,152 @@
       if (points.length === 0) return;
 
       const sphereGeo = new THREE.SphereGeometry(0.12, 16, 16);
+
+      // Nodos Perímetro
       points.forEach((p, index) => {
         let color = 0x2196f3;
-        let scale = 1.0;
-
-        if (index === selectedIndex) {
-          color = 0xff9800;
-          scale = 1.5;
-        } else if (index === 0) {
-          color = 0xf44336;
-        }
+        let scale = (selectedType === 'outer' && index === selectedIndex) ? (color = 0xff9800, 1.5) : 1.0;
+        if (index === 0) color = 0xf44336;
 
         const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.3 });
         const sphere = new THREE.Mesh(sphereGeo, mat);
         sphere.position.copy(p);
         sphere.scale.setScalar(scale);
-        sphere.userData = { pointIndex: index };
+        sphere.userData = { pointIndex: index, type: 'outer' };
         nodeGroup.add(sphere);
 
         if (Math.abs(p.y) > 0.05) {
           const dropPoints = [p.clone(), new THREE.Vector3(p.x, 0, p.z)];
           const dropGeo = new THREE.BufferGeometry().setFromPoints(dropPoints);
-          const dropMat = new THREE.LineDashedMaterial({
-            color: 0x888888,
-            dashSize: 0.1,
-            gapSize: 0.1
-          });
+          const dropMat = new THREE.LineDashedMaterial({ color: 0x888888, dashSize: 0.1, gapSize: 0.1 });
           const dropLine = new THREE.Line(dropGeo, dropMat);
           dropLine.computeLineDistances();
           projectionGroup.add(dropLine);
         }
       });
 
+      // Nodos Interiores
+      innerPoints.forEach((p, index) => {
+        let color = 0xff9800;
+        let scale = 1.1;
+        if (selectedType === 'inner' && index === selectedIndex) {
+          color = 0xffeb3b; scale = 1.6;
+        }
+
+        const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.2 });
+        const sphere = new THREE.Mesh(sphereGeo, mat);
+        sphere.position.copy(p);
+        sphere.scale.setScalar(scale);
+        sphere.userData = { pointIndex: index, type: 'inner' };
+        nodeGroup.add(sphere);
+
+        const dropPoints = [p.clone(), new THREE.Vector3(p.x, 0, p.z)];
+        const dropGeo = new THREE.BufferGeometry().setFromPoints(dropPoints);
+        const dropMat = new THREE.LineDashedMaterial({ color: 0xff9800, dashSize: 0.08, gapSize: 0.08 });
+        const dropLine = new THREE.Line(dropGeo, dropMat);
+        dropLine.computeLineDistances();
+        projectionGroup.add(dropLine);
+      });
+
+      // Contorno Exterior 3D
       if (points.length > 1) {
         const linePoints = [...points];
         if (isClosed) linePoints.push(points[0]);
-
         const lineGeo = new THREE.BufferGeometry().setFromPoints(linePoints);
-        const lineMat = new THREE.LineBasicMaterial({
-          color: isClosed ? 0x00e676 : 0x2196f3,
-          linewidth: 3
-        });
+        const lineMat = new THREE.LineBasicMaterial({ color: isClosed ? 0x00e676 : 0x2196f3, linewidth: 3 });
         lineGroup.add(new THREE.Line(lineGeo, lineMat));
       }
 
+      // Proyección Suelo 2D
       if (points.length > 1) {
         const projPoints = points.map(p => new THREE.Vector3(p.x, 0, p.z));
         if (isClosed) projPoints.push(projPoints[0]);
-
         const projLineGeo = new THREE.BufferGeometry().setFromPoints(projPoints);
         const projLineMat = new THREE.LineBasicMaterial({ color: 0x555555, linewidth: 1.5 });
         projectionGroup.add(new THREE.Line(projLineGeo, projLineMat));
       }
 
+      // --- 6. MALLA DE TERRENO UNIFICADA (DELAUNAY 3D) ---
       if (isClosed && points.length >= 3) {
         const shape2D = new THREE.Shape();
         shape2D.moveTo(points[0].x, points[0].z);
-        for (let i = 1; i < points.length; i++) {
-          shape2D.lineTo(points[i].x, points[i].z);
-        }
+        for (let i = 1; i < points.length; i++) shape2D.lineTo(points[i].x, points[i].z);
         const shapeGeo2D = new THREE.ShapeGeometry(shape2D);
         shapeGeo2D.rotateX(Math.PI / 2);
 
-        const fillMat2D = new THREE.MeshBasicMaterial({
-          color: 0x2e7d32,
-          side: THREE.DoubleSide,
-          transparent: true,
-          opacity: 0.25
-        });
+        const fillMat2D = new THREE.MeshBasicMaterial({ color: 0x2e7d32, side: THREE.DoubleSide, transparent: true, opacity: 0.25 });
         meshSurface2D = new THREE.Mesh(shapeGeo2D, fillMat2D);
         meshSurface2D.position.y = 0.001;
         scene.add(meshSurface2D);
 
-        const vertices = [];
-        points.forEach(p => vertices.push(p.x, p.y, p.z));
+        // Unir todos los puntos (perímetro + interiores) para la triangulación Delaunay
+        const allPoints = [...points, ...innerPoints];
+        const coords2D = allPoints.map(p => [p.x, p.z]);
+        
+        const delaunay = Delaunay.from(coords2D);
+        const rawTriangles = delaunay.triangles;
 
-        const center = new THREE.Vector3();
-        points.forEach(p => center.add(p));
-        center.divideScalar(points.length);
-        vertices.push(center.x, center.y, center.z);
-        const centerIndex = points.length;
+        const validIndices = [];
+        for (let i = 0; i < rawTriangles.length; i += 3) {
+          const ia = rawTriangles[i];
+          const ib = rawTriangles[i+1];
+          const ic = rawTriangles[i+2];
 
-        const indices = [];
-        for (let i = 0; i < points.length; i++) {
-          const nextIndex = (i + 1) % points.length;
-          indices.push(i, nextIndex, centerIndex);
+          const pa = allPoints[ia];
+          const pb = allPoints[ib];
+          const pc = allPoints[ic];
+
+          // Filtrar triángulos cuyo centroide esté dentro del polígono delimitador
+          const cx = (pa.x + pb.x + pc.x) / 3;
+          const cz = (pa.z + pb.z + pc.z) / 3;
+
+          if (isPointInPolygon([cx, cz], points)) {
+            validIndices.push(ia, ib, ic);
+          }
         }
+
+        const vertices = [];
+        allPoints.forEach(p => vertices.push(p.x, p.y, p.z));
 
         const geo3D = new THREE.BufferGeometry();
         geo3D.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-        geo3D.setIndex(indices);
+        geo3D.setIndex(validIndices);
         geo3D.computeVertexNormals();
 
         const wireframeGeo = new THREE.WireframeGeometry(geo3D);
-        const wireframeMat = new THREE.LineBasicMaterial({
-          color: 0x00ff88,
-          linewidth: 2,
-          transparent: true,
-          opacity: 0.85
-        });
+        const wireframeMat = new THREE.LineBasicMaterial({ color: 0x00ff88, linewidth: 2, transparent: true, opacity: 0.85 });
         const wireframeMesh = new THREE.LineSegments(wireframeGeo, wireframeMat);
 
-        const fillMat3D = new THREE.MeshStandardMaterial({
-          color: 0x1b5e20,
-          side: THREE.DoubleSide,
-          transparent: true,
-          opacity: 0.45,
-          roughness: 0.5
-        });
-
+        const fillMat3D = new THREE.MeshStandardMaterial({ color: 0x1b5e20, side: THREE.DoubleSide, transparent: true, opacity: 0.45, roughness: 0.5 });
         meshSurface3D = new THREE.Mesh(geo3D, fillMat3D);
         meshSurface3D.add(wireframeMesh);
         scene.add(meshSurface3D);
       }
     }
 
-    // --- 5. GENERADOR DXF ---
-    function generateDXF(pointsList, closed) {
+    // --- 7. EXPORTACIÓN DXF ---
+    function generateDXF(perimeterPts, innerPts, closed) {
       let dxf = [];
       dxf.push("0", "SECTION", "2", "HEADER", "0", "ENDSEC");
       dxf.push("0", "SECTION", "2", "TABLES");
-      
       dxf.push("0", "TABLE", "2", "LAYER");
       dxf.push("0", "LAYER", "2", "PLANTA_2D", "70", "0", "62", "4");
       dxf.push("0", "LAYER", "2", "RELIEVE_3D", "70", "0", "62", "3");
       dxf.push("0", "LAYER", "2", "PUNTOS", "70", "0", "62", "1");
       dxf.push("0", "ENDTAB", "0", "ENDSEC");
-      
       dxf.push("0", "SECTION", "2", "ENTITIES");
 
-      pointsList.forEach(p => {
+      [...perimeterPts, ...innerPts].forEach(p => {
         dxf.push("0", "POINT", "8", "PUNTOS");
         dxf.push("10", p.x.toFixed(4), "20", p.z.toFixed(4), "30", p.y.toFixed(4));
       });
 
-      const loop3D = [...pointsList];
-      if (closed) loop3D.push(pointsList[0]);
-
+      const loop3D = [...perimeterPts];
+      if (closed) loop3D.push(perimeterPts[0]);
       for (let i = 0; i < loop3D.length - 1; i++) {
-        const p1 = loop3D[i];
-        const p2 = loop3D[i + 1];
         dxf.push("0", "LINE", "8", "RELIEVE_3D");
-        dxf.push("10", p1.x.toFixed(4), "20", p1.z.toFixed(4), "30", p1.y.toFixed(4));
-        dxf.push("11", p2.x.toFixed(4), "21", p2.z.toFixed(4), "31", p2.y.toFixed(4));
-      }
-
-      for (let i = 0; i < loop3D.length - 1; i++) {
-        const p1 = loop3D[i];
-        const p2 = loop3D[i + 1];
-        dxf.push("0", "LINE", "8", "PLANTA_2D");
-        dxf.push("10", p1.x.toFixed(4), "20", p1.z.toFixed(4), "30", "0.0000");
-        dxf.push("11", p2.x.toFixed(4), "21", p2.z.toFixed(4), "31", "0.0000");
+        dxf.push("10", loop3D[i].x.toFixed(4), "20", loop3D[i].z.toFixed(4), "30", loop3D[i].y.toFixed(4));
+        dxf.push("11", loop3D[i+1].x.toFixed(4), "21", loop3D[i+1].z.toFixed(4), "31", loop3D[i+1].y.toFixed(4));
       }
 
       dxf.push("0", "ENDSEC", "0", "EOF");
@@ -668,16 +602,16 @@
 
     document.getElementById('btnExportDXF').addEventListener('click', () => {
       if (points.length < 2) return;
-      const dxfContent = generateDXF(points, isClosed);
+      const dxfContent = generateDXF(points, innerPoints, isClosed);
       const blob = new Blob([dxfContent], { type: 'application/dxf' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = `GeoMeasure_${new Date().toISOString().slice(0,10)}.dxf`;
+      link.download = `GeoMeasure_Terreno_${new Date().toISOString().slice(0,10)}.dxf`;
       link.click();
       URL.revokeObjectURL(link.href);
     });
 
-    // --- 6. INTERACCIÓN Y MÉTRICAS ---
+    // --- 8. INTERACCIÓN Y MÉTRICAS ---
     function onPointerDown(event) {
       if (event.target.tagName === 'BUTTON' || 
           event.target.closest('#metrics') || 
@@ -693,6 +627,7 @@
       if (intersects.length > 0) {
         const hitObject = intersects[0].object;
         selectedIndex = hitObject.userData.pointIndex;
+        selectedType = hitObject.userData.type;
         showSelectionCard(true);
       } else {
         selectedIndex = -1;
@@ -706,7 +641,7 @@
     function showSelectionCard(visible) {
       const card = document.getElementById('selection-card');
       if (visible && selectedIndex !== -1) {
-        document.getElementById('lbl-selected-info').innerText = `Punto #${selectedIndex + 1} seleccionado`;
+        document.getElementById('lbl-selected-info').innerText = `Punto ${selectedType === 'outer' ? 'Perímetro' : 'Interior'} #${selectedIndex + 1}`;
         card.style.display = 'flex';
       } else {
         card.style.display = 'none';
@@ -715,10 +650,14 @@
 
     document.getElementById('btnDeletePoint').addEventListener('click', () => {
       if (selectedIndex === -1) return;
-      points.splice(selectedIndex, 1);
+      if (selectedType === 'outer') {
+        points.splice(selectedIndex, 1);
+        if (points.length < 3) isClosed = false;
+      } else {
+        innerPoints.splice(selectedIndex, 1);
+      }
       selectedIndex = -1;
       showSelectionCard(false);
-      if (points.length < 3) isClosed = false;
       updateMetrics();
       update3DScene();
     });
@@ -730,24 +669,21 @@
     });
 
     function updateMetrics() {
-      document.getElementById('lbl-pts').innerText = points.length;
+      document.getElementById('lbl-pts').innerText = points.length + ' pts';
+      document.getElementById('lbl-inner-pts').innerText = innerPoints.length + ' pts';
       document.getElementById('btnClose').disabled = points.length < 3 || isClosed;
+      document.getElementById('btnAddManual').disabled = !isClosed;
       document.getElementById('btnExportDXF').disabled = points.length < 2;
 
       let perimeter = 0;
-      for (let i = 1; i < points.length; i++) {
-        perimeter += points[i].distanceTo(points[i - 1]);
-      }
-      if (isClosed && points.length > 2) {
-        perimeter += points[points.length - 1].distanceTo(points[0]);
-      }
+      for (let i = 1; i < points.length; i++) perimeter += points[i].distanceTo(points[i - 1]);
+      if (isClosed && points.length > 2) perimeter += points[points.length - 1].distanceTo(points[0]);
       document.getElementById('lbl-per').innerText = perimeter.toFixed(2) + ' m';
 
       if (isClosed && points.length >= 3) {
         let area = 0;
         for (let i = 0; i < points.length; i++) {
-          const p1 = points[i];
-          const p2 = points[(i + 1) % points.length];
+          const p1 = points[i], p2 = points[(i + 1) % points.length];
           area += (p1.x * p2.z) - (p2.x * p1.z);
         }
         document.getElementById('lbl-area').innerText = (Math.abs(area) / 2).toFixed(2) + ' m²';
@@ -767,18 +703,12 @@
 
     document.getElementById('btnAdd').addEventListener('click', () => {
       if (isClosed) return;
-
       if (simIdx < demoPath3D.length) {
         points.push(demoPath3D[simIdx++].clone());
       } else {
         const last = points[points.length - 1];
-        points.push(new THREE.Vector3(
-          last.x + (Math.random() - 0.3) * 2,
-          last.y + (Math.random() - 0.4) * 0.6,
-          last.z + (Math.random() - 0.3) * 2
-        ));
+        points.push(new THREE.Vector3(last.x + (Math.random() - 0.3) * 2, last.y + (Math.random() - 0.4) * 0.6, last.z + (Math.random() - 0.3) * 2));
       }
-
       updateMetrics();
       update3DScene();
     });
@@ -790,8 +720,25 @@
       update3DScene();
     });
 
+    document.getElementById('btnAddManual').addEventListener('click', () => {
+      if (!isClosed) return;
+      const center = new THREE.Vector3();
+      points.forEach(p => center.add(p));
+      center.divideScalar(points.length);
+
+      const newInnerPoint = new THREE.Vector3(
+        center.x + (Math.random() - 0.5) * 2.5,
+        (Math.random() - 0.2) * 1.5,
+        center.z + (Math.random() - 0.5) * 2.5
+      );
+      innerPoints.push(newInnerPoint);
+      updateMetrics();
+      update3DScene();
+    });
+
     document.getElementById('btnClear').addEventListener('click', () => {
       points.length = 0;
+      innerPoints.length = 0;
       selectedIndex = -1;
       isClosed = false;
       simIdx = 0;
@@ -800,13 +747,11 @@
       update3DScene();
     });
 
-    // --- 7. BUCLE ANIMACIÓN ---
+    // --- 9. BUCLE ANIMACIÓN ---
     function animate() {
       requestAnimationFrame(animate);
       controls.update();
-
       viewCubeMesh.quaternion.copy(camera.quaternion).invert();
-
       renderer.render(scene, camera);
       cubeRenderer.render(cubeScene, cubeCamera);
     }
