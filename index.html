@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Medidor Inercial 3D PWA - ViewCube</title>
+  <title>Medidor Inercial 3D PWA - ViewCube Interactivo</title>
   <style>
     body {
       margin: 0;
@@ -38,7 +38,7 @@
     .metric { text-align: center; }
     .metric span { display: block; font-size: 1.1rem; font-weight: bold; color: #4caf50; }
     
-    /* Widget de Navegación: Botón Home + ViewCube */
+    /* Widget de Navegación */
     #nav-widget {
       pointer-events: auto;
       position: absolute;
@@ -67,7 +67,11 @@
     #viewcube-container {
       width: 100px;
       height: 100px;
-      cursor: pointer;
+      cursor: grab;
+      touch-action: none;
+    }
+    #viewcube-container:active {
+      cursor: grabbing;
     }
 
     /* Panel flotante de selección de punto */
@@ -138,13 +142,11 @@
       <div class="metric">Área (2D): <span id="lbl-area">-- m²</span></div>
     </div>
 
-    <!-- Contenedor del Botón Home + Cubo 3D de Navegación -->
     <div id="nav-widget">
       <button id="btn-home" title="Vista Superior (Home)">🏠</button>
       <div id="viewcube-container"></div>
     </div>
 
-    <!-- Menú contextual de selección de punto -->
     <div id="selection-card">
       <span id="lbl-selected-info">Punto #1 seleccionado</span>
       <div style="display: flex; gap: 8px;">
@@ -166,7 +168,7 @@
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-    // --- ESTADO Y VARIABLES GLOBALES ---
+    // --- ESTADO GLOBAL ---
     const points = [];
     let selectedIndex = -1;
     let isClosed = false;
@@ -174,7 +176,7 @@
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
 
-    // --- 1. ESCENA PRINCIPAL THREE.JS ---
+    // --- 1. ESCENA PRINCIPAL ---
     const canvas = document.getElementById('canvas3d');
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x121212);
@@ -190,9 +192,7 @@
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
 
-    const gridHelper = new THREE.GridHelper(20, 20, 0x444444, 0x222222);
-    scene.add(gridHelper);
-
+    scene.add(new THREE.GridHelper(20, 20, 0x444444, 0x222222));
     scene.add(new THREE.AmbientLight(0xffffff, 0.7));
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
     dirLight.position.set(10, 20, 10);
@@ -204,7 +204,7 @@
     scene.add(lineGroup);
     scene.add(nodeGroup);
 
-    // --- 2. ESCENA SECUNDARIA: VIEWCUBE (CUBO DE ORIENTACIÓN) ---
+    // --- 2. ESCENA VIEWCUBE ---
     const cubeContainer = document.getElementById('viewcube-container');
     const cubeScene = new THREE.Scene();
     const cubeCamera = new THREE.PerspectiveCamera(45, 1, 0.1, 10);
@@ -216,30 +216,24 @@
 
     cubeScene.add(new THREE.AmbientLight(0xffffff, 0.8));
 
-    // Función auxiliar para crear texturas con texto dinámico para las caras
     function createCubeFaceTexture(text) {
       const canvasText = document.createElement('canvas');
       canvasText.width = 128;
       canvasText.height = 128;
       const ctx = canvasText.getContext('2d');
-      
       ctx.fillStyle = '#3a3a3a';
       ctx.fillRect(0, 0, 128, 128);
-      
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 6;
       ctx.strokeRect(0, 0, 128, 128);
-      
       ctx.fillStyle = '#ffffff';
       ctx.font = 'Bold 20px system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(text, 64, 64);
-      
       return new THREE.CanvasTexture(canvasText);
     }
 
-    // Caras del cubo en orden: +X (Derecha), -X (Izquierda), +Y (Superior), -Y (Inferior), +Z (Frontal), -Z (Posterior)
     const materials = [
       new THREE.MeshBasicMaterial({ map: createCubeFaceTexture('Derecha'), userData: 'right' }),
       new THREE.MeshBasicMaterial({ map: createCubeFaceTexture('Izquierda'), userData: 'left' }),
@@ -249,64 +243,91 @@
       new THREE.MeshBasicMaterial({ map: createCubeFaceTexture('Posterior'), userData: 'back' })
     ];
 
-    const cubeGeo = new THREE.BoxGeometry(1.5, 1.5, 1.5);
-    const viewCubeMesh = new THREE.Mesh(cubeGeo, materials);
+    const viewCubeMesh = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 1.5), materials);
     cubeScene.add(viewCubeMesh);
 
-    // Detección de clic en el ViewCube
+    // --- 3. LÓGICA DE CLICK / DRAG EN VIEWCUBE ---
+    let isDraggingCube = false;
+    let cubeDragDistance = 0;
+    let previousPointerPosition = { x: 0, y: 0 };
     const cubeRaycaster = new THREE.Raycaster();
     const cubeMouse = new THREE.Vector2();
 
-    cubeContainer.addEventListener('pointerdown', (event) => {
-      const rect = cubeContainer.getBoundingClientRect();
-      cubeMouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      cubeMouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    cubeContainer.addEventListener('pointerdown', (e) => {
+      isDraggingCube = true;
+      cubeDragDistance = 0;
+      previousPointerPosition = { x: e.clientX, y: e.clientY };
+      cubeContainer.setPointerCapture(e.pointerId);
+    });
 
-      cubeRaycaster.setFromCamera(cubeMouse, cubeCamera);
-      const intersects = cubeRaycaster.intersectObject(viewCubeMesh);
+    cubeContainer.addEventListener('pointermove', (e) => {
+      if (!isDraggingCube) return;
 
-      if (intersects.length > 0) {
-        const faceIndex = intersects[0].face.materialIndex;
-        const faceType = materials[faceIndex].userData;
-        setCameraView(faceType);
+      const deltaX = e.clientX - previousPointerPosition.x;
+      const deltaY = e.clientY - previousPointerPosition.y;
+      cubeDragDistance += Math.hypot(deltaX, deltaY);
+
+      if (cubeDragDistance > 3) { // Si hay arrastre, giramos la cámara en órbita
+        const rotateSpeed = 0.008;
+        
+        // Obtenemos ángulo esférico actual
+        const offset = camera.position.clone().sub(controls.target);
+        let spherical = new THREE.Spherical().setFromVector3(offset);
+
+        spherical.theta -= deltaX * rotateSpeed;
+        spherical.phi -= deltaY * rotateSpeed;
+
+        // Limitar para no volcar la cámara completamente
+        spherical.phi = Math.max(0.01, Math.min(Math.PI - 0.01, spherical.phi));
+
+        offset.setFromSpherical(spherical);
+        camera.position.copy(controls.target).add(offset);
+        controls.update();
+      }
+
+      previousPointerPosition = { x: e.clientX, y: e.clientY };
+    });
+
+    cubeContainer.addEventListener('pointerup', (e) => {
+      if (!isDraggingCube) return;
+      isDraggingCube = false;
+      cubeContainer.releasePointerCapture(e.pointerId);
+
+      // Si apenas hubo desplazamiento (fue un toque rápido), hacemos clic en la cara
+      if (cubeDragDistance <= 5) {
+        const rect = cubeContainer.getBoundingClientRect();
+        cubeMouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        cubeMouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+        cubeRaycaster.setFromCamera(cubeMouse, cubeCamera);
+        const intersects = cubeRaycaster.intersectObject(viewCubeMesh);
+
+        if (intersects.length > 0) {
+          const faceIndex = intersects[0].face.materialIndex;
+          setCameraView(materials[faceIndex].userData);
+        }
       }
     });
 
-    // --- 3. FUNCIONES DE POSICIONAMIENTO DE CÁMARA ---
+    // --- 4. VISTAS DE CÁMARA & HOME ---
     function setCameraView(view) {
       const target = controls.target.clone();
-      const dist = 12; // Distancia estándar
+      const dist = 12;
 
       switch (view) {
-        case 'top':
-          camera.position.set(target.x, target.y + dist, target.z + 0.001);
-          break;
-        case 'front':
-          camera.position.set(target.x, target.y, target.z + dist);
-          break;
-        case 'back':
-          camera.position.set(target.x, target.y, target.z - dist);
-          break;
-        case 'right':
-          camera.position.set(target.x + dist, target.y, target.z);
-          break;
-        case 'left':
-          camera.position.set(target.x - dist, target.y, target.z);
-          break;
-        case 'bottom':
-          camera.position.set(target.x, target.y - dist, target.z + 0.001);
-          break;
+        case 'top': camera.position.set(target.x, target.y + dist, target.z + 0.001); break;
+        case 'front': camera.position.set(target.x, target.y, target.z + dist); break;
+        case 'back': camera.position.set(target.x, target.y, target.z - dist); break;
+        case 'right': camera.position.set(target.x + dist, target.y, target.z); break;
+        case 'left': camera.position.set(target.x - dist, target.y, target.z); break;
+        case 'bottom': camera.position.set(target.x, target.y - dist, target.z + 0.001); break;
       }
       controls.update();
     }
 
-    // Botón HOME: Coloca la cámara desde ARRIBA (Vista en Planta 2D)
-    document.getElementById('btn-home').addEventListener('click', () => {
-      setCameraView('top');
-    });
+    document.getElementById('btn-home').addEventListener('click', () => setCameraView('top'));
 
-
-    // --- 4. DIBUJADO Y LOGICA DE LA ESCENA 3D ---
+    // --- 5. RENDER Y EDICIÓN 3D ---
     function update3DScene() {
       lineGroup.clear();
       nodeGroup.clear();
@@ -319,7 +340,6 @@
 
       if (points.length === 0) return;
 
-      // Nodos
       const sphereGeo = new THREE.SphereGeometry(0.12, 16, 16);
       points.forEach((p, index) => {
         let color = 0x2196f3;
@@ -340,7 +360,6 @@
         nodeGroup.add(sphere);
       });
 
-      // Líneas
       if (points.length > 1) {
         const linePoints = [...points];
         if (isClosed) linePoints.push(points[0]);
@@ -353,7 +372,6 @@
         lineGroup.add(new THREE.Line(lineGeo, lineMat));
       }
 
-      // Plano Relleno
       if (isClosed && points.length >= 3) {
         const shape = new THREE.Shape();
         shape.moveTo(points[0].x, points[0].z);
@@ -377,7 +395,6 @@
       }
     }
 
-    // --- Raycasting para seleccionar puntos ---
     function onPointerDown(event) {
       if (event.target.tagName === 'BUTTON' || 
           event.target.closest('#metrics') || 
@@ -417,9 +434,7 @@
       points.splice(selectedIndex, 1);
       selectedIndex = -1;
       showSelectionCard(false);
-
       if (points.length < 3) isClosed = false;
-
       updateMetrics();
       update3DScene();
     });
@@ -456,7 +471,6 @@
       }
     }
 
-    // Datos de simulación
     const demoPath3D = [
       new THREE.Vector3(0, 0, 0),
       new THREE.Vector3(4, 0, 0),
@@ -501,12 +515,12 @@
       update3DScene();
     });
 
-    // --- 5. BUCLE DE ANIMACIÓN Y SINCRONIZACIÓN VIEWCUBE ---
+    // --- 6. ANIMACIÓN ---
     function animate() {
       requestAnimationFrame(animate);
       controls.update();
 
-      // Sincronización del ViewCube con la orientación de la cámara principal
+      // Mantiene sincronizado el cubo pequeño con la cámara principal
       viewCubeMesh.quaternion.copy(camera.quaternion).invert();
 
       renderer.render(scene, camera);
