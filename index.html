@@ -216,45 +216,63 @@
         lineGroup.add(new THREE.Line(lineGeo, lineMat));
       }
 
-// 3. GENERAR SUPERFICIE CON MALLA TIPO TERRENO (WIREFRAME + RETAZO)
+// 3. GENERAR MALLA 3D REAL (TIPO RED TOPOGRÁFICA / TERRENO)
 if (isClosed && points.length >= 3) {
-  // Crear la forma 2D del polígono
-  const shape = new THREE.Shape();
-  shape.moveTo(points[0].x, points[0].z);
-  for (let i = 1; i < points.length; i++) {
-    shape.lineTo(points[i].x, points[i].z);
+  // A) Crear un array de posiciones (X, Y, Z) a partir de nuestros puntos 3D reales
+  const vertices = [];
+  points.forEach(p => {
+    vertices.push(p.x, p.y, p.z);
+  });
+
+  // B) Algoritmo de Triangulación en Abanico (Fan Triangulation) desde el punto central
+  // Calculamos el centroide 3D (promedio de todos los puntos) para que la malla converja al centro
+  const center = new THREE.Vector3();
+  points.forEach(p => center.add(p));
+  center.divideScalar(points.length);
+
+  // Añadimos el punto central al final del array de vértices
+  vertices.push(center.x, center.y, center.z);
+  const centerIndex = points.length;
+
+  // C) Generar los índices de los triángulos que forman la cara 3D
+  const indices = [];
+  for (let i = 0; i < points.length; i++) {
+    const nextIndex = (i + 1) % points.length;
+    // Cada triángulo se forma entre: Punto Actual, Punto Siguiente y el Centroide
+    indices.push(i, nextIndex, centerIndex);
   }
 
-  // Generar la geometría triangulada
-  const shapeGeo = new THREE.ShapeGeometry(shape);
-  shapeGeo.rotateX(Math.PI / 2); // Orientar horizontalmente
+  // D) Construir la Geometría Customizada en Three.js
+  const customGeo = new THREE.BufferGeometry();
+  customGeo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+  customGeo.setIndex(indices);
+  customGeo.computeVertexNormals(); // Para que responda correctamente a la luz 3D
 
-  // --- CAPA 1: Superficie traslúcida base ---
-  const fillMat = new THREE.MeshStandardMaterial({
-    color: 0x2e7d32,       // Verde oscuro técnico
-    side: THREE.DoubleSide,
-    transparent: true,
-    opacity: 0.3,
-    roughness: 0.8
-  });
-  meshSurface = new THREE.Mesh(shapeGeo, fillMat);
-  meshSurface.position.y = 0.001; // Para evitar z-fighting con el suelo
-
-  // --- CAPA 2: Malla Topográfica (Wireframe Overlay) ---
-  const wireframeGeo = new THREE.WireframeGeometry(shapeGeo);
+  // E) Material de la Malla (Líneas Verdes Neón)
+  const wireframeGeo = new THREE.WireframeGeometry(customGeo);
   const wireframeMat = new THREE.LineBasicMaterial({
-    color: 0x81c784,       // Verde claro brillante para resaltar las cotas
-    linewidth: 1.5,
+    color: 0x00ff88,       // Verde brillante técnico
+    linewidth: 2,
     transparent: true,
-    opacity: 0.8
+    opacity: 0.95
   });
   const wireframeMesh = new THREE.LineSegments(wireframeGeo, wireframeMat);
 
-  // Unir la malla al objeto de superficie principal
+  // F) Material de la Cara Traslúcida (Sombra de relleno)
+  const fillMat = new THREE.MeshStandardMaterial({
+    color: 0x1b5e20,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.35,
+    roughness: 0.5
+  });
+  meshSurface = new THREE.Mesh(customGeo, fillMat);
+
+  // Unir la malla 3D al polígono
   meshSurface.add(wireframeMesh);
   scene.add(meshSurface);
 }
-    }
+}
 
     // --- DETECCIÓN DE CLIC Y SELECCIÓN (RAYCASTING) ---
     function onPointerDown(event) {
