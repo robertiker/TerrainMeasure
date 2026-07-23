@@ -3,9 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>GeoMeasure 3D - Malla de Terreno Unificada</title>
-  <link rel="manifest" href="manifest.json">
+  <title>GeoMeasure 3D</title>
+
   <!-- PWA & Favicon Config -->
+  <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/png" id="app-favicon" href="">
   <link rel="apple-touch-icon" id="apple-icon" href="">
   <meta name="theme-color" content="#121212">
@@ -125,27 +126,65 @@
     }
     #selection-card span { font-weight: bold; color: #ff9800; }
     
-    #controls {
+    /* BARRA DE BOTONES REDONDOS CON SCROLL HORIZONTAL */
+    #controls-wrapper {
       pointer-events: auto;
-      padding: 16px;
-      background: rgba(20, 20, 20, 0.9);
-      backdrop-filter: blur(10px);
-      display: flex;
-      gap: 10px;
-      justify-content: center;
-      flex-wrap: wrap;
+      padding: 12px 16px 20px 16px;
+      background: rgba(20, 20, 20, 0.85);
+      backdrop-filter: blur(12px);
       border-top: 1px solid rgba(255, 255, 255, 0.1);
     }
-    button {
-      padding: 10px 16px;
-      border: none;
-      border-radius: 6px;
-      font-weight: bold;
-      cursor: pointer;
-      font-size: 0.9rem;
-      transition: opacity 0.2s;
+    #controls {
+      display: flex;
+      gap: 16px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scroll-behavior: smooth;
+      -webkit-overflow-scrolling: touch;
+      padding: 4px 8px;
+      align-items: center;
     }
-    button:active { opacity: 0.7; }
+    /* Ocultar barra de scroll estéticamente */
+    #controls::-webkit-scrollbar {
+      height: 4px;
+    }
+    #controls::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 4px;
+    }
+
+    /* Estructura del botón circular */
+    .btn-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0; /* Evita que el botón se reduzca */
+    }
+    .btn-round {
+      width: 54px;
+      height: 54px;
+      border-radius: 50%;
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.3rem;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+      transition: transform 0.15s, opacity 0.2s;
+    }
+    .btn-round:active {
+      transform: scale(0.92);
+    }
+    .btn-label {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.85);
+      white-space: nowrap;
+    }
+
+    /* Estilos por acción */
     .btn-sim { background: #2196f3; color: #fff; }
     .btn-close { background: #00e676; color: #000; }
     .btn-manual { background: #ff9800; color: #000; }
@@ -153,7 +192,17 @@
     .btn-delete { background: #e91e63; color: #fff; }
     .btn-cancel { background: #666; color: #fff; }
     .btn-clear { background: #f44336; color: #fff; }
-    button:disabled { background: #555; opacity: 0.5; cursor: not-allowed; }
+    
+    .btn-round:disabled {
+      background: #333 !important;
+      color: #666 !important;
+      box-shadow: none;
+      cursor: not-allowed;
+    }
+    .btn-round:disabled + .btn-label {
+      color: rgba(255, 255, 255, 0.3);
+    }
+
     #canvas3d { width: 100vw; height: 100vh; display: block; }
   </style>
 
@@ -193,17 +242,35 @@
     <div id="selection-card">
       <span id="lbl-selected-info">Punto seleccionado</span>
       <div style="display: flex; gap: 8px;">
-        <button class="btn-delete" id="btnDeletePoint">Borrar Punto</button>
-        <button class="btn-cancel" id="btnDeselectPoint">Cancelar</button>
+        <button class="btn-round btn-delete" id="btnDeletePoint" style="width:40px; height:40px; font-size:1rem;">🗑️</button>
+        <button class="btn-round btn-cancel" id="btnDeselectPoint" style="width:40px; height:40px; font-size:1rem;">❌</button>
       </div>
     </div>
 
-    <div id="controls">
-      <button class="btn-sim" id="btnAdd">+ Perímetro 3D</button>
-      <button class="btn-close" id="btnClose" disabled>Cerrar Plano</button>
-      <button class="btn-manual" id="btnAddManual" disabled>📍 Punto Manual</button>
-      <button class="btn-export" id="btnExportDXF" disabled>💾 Exportar DXF</button>
-      <button class="btn-clear" id="btnClear">Limpiar</button>
+    <!-- ZONA RECTANGULAR DE CONTROLES CON DESPLAZAMIENTO HORIZONTAL -->
+    <div id="controls-wrapper">
+      <div id="controls">
+        <div class="btn-item">
+          <button class="btn-round btn-sim" id="btnAdd">➕</button>
+          <span class="btn-label">Punto 3D</span>
+        </div>
+        <div class="btn-item">
+          <button class="btn-round btn-close" id="btnClose" disabled>🔒</button>
+          <span class="btn-label">Cerrar Plano</span>
+        </div>
+        <div class="btn-item">
+          <button class="btn-round btn-manual" id="btnAddManual" disabled>📍</button>
+          <span class="btn-label">Cota Interior</span>
+        </div>
+        <div class="btn-item">
+          <button class="btn-round btn-export" id="btnExportDXF" disabled>💾</button>
+          <span class="btn-label">Exportar DXF</span>
+        </div>
+        <div class="btn-item">
+          <button class="btn-round btn-clear" id="btnClear">🧹</button>
+          <span class="btn-label">Limpiar</span>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -412,7 +479,7 @@
 
     document.getElementById('btn-home').addEventListener('click', () => setCameraView('top'));
 
-    // --- 4. ALGORITMO PUNTO EN POLÍGONO (Para Filtrar Triángulos Internos) ---
+    // --- 4. FILTRAR TRIÁNGULOS INTERNOS ---
     function isPointInPolygon(pt, polygon) {
       const x = pt[0], z = pt[1];
       let inside = false;
@@ -426,7 +493,7 @@
       return inside;
     }
 
-    // --- 5. RENDERIZADO DE LA ESCENA CON DELAUNAY UNIFICADO ---
+    // --- 5. RENDERIZADO DE LA ESCENA Y MALLA DELAUNAY ---
     function update3DScene() {
       lineGroup.clear();
       nodeGroup.clear();
@@ -495,7 +562,7 @@
         projectionGroup.add(dropLine);
       });
 
-      // Contorno Exterior 3D
+      // Contorno Exterior
       if (points.length > 1) {
         const linePoints = [...points];
         if (isClosed) linePoints.push(points[0]);
@@ -504,7 +571,7 @@
         lineGroup.add(new THREE.Line(lineGeo, lineMat));
       }
 
-      // Proyección Suelo 2D
+      // Proyección Suelo
       if (points.length > 1) {
         const projPoints = points.map(p => new THREE.Vector3(p.x, 0, p.z));
         if (isClosed) projPoints.push(projPoints[0]);
@@ -513,7 +580,7 @@
         projectionGroup.add(new THREE.Line(projLineGeo, projLineMat));
       }
 
-      // --- 6. MALLA DE TERRENO UNIFICADA (DELAUNAY 3D) ---
+      // Malla Delaunay Unificada
       if (isClosed && points.length >= 3) {
         const shape2D = new THREE.Shape();
         shape2D.moveTo(points[0].x, points[0].z);
@@ -526,7 +593,6 @@
         meshSurface2D.position.y = 0.001;
         scene.add(meshSurface2D);
 
-        // Unir todos los puntos (perímetro + interiores) para la triangulación Delaunay
         const allPoints = [...points, ...innerPoints];
         const coords2D = allPoints.map(p => [p.x, p.z]);
         
@@ -543,7 +609,6 @@
           const pb = allPoints[ib];
           const pc = allPoints[ic];
 
-          // Filtrar triángulos cuyo centroide esté dentro del polígono delimitador
           const cx = (pa.x + pb.x + pc.x) / 3;
           const cz = (pa.z + pb.z + pc.z) / 3;
 
@@ -571,7 +636,7 @@
       }
     }
 
-    // --- 7. EXPORTACIÓN DXF ---
+    // --- 6. EXPORTACIÓN DXF ---
     function generateDXF(perimeterPts, innerPts, closed) {
       let dxf = [];
       dxf.push("0", "SECTION", "2", "HEADER", "0", "ENDSEC");
@@ -611,12 +676,13 @@
       URL.revokeObjectURL(link.href);
     });
 
-    // --- 8. INTERACCIÓN Y MÉTRICAS ---
+    // --- 7. INTERACCIÓN Y MÉTRICAS ---
     function onPointerDown(event) {
       if (event.target.tagName === 'BUTTON' || 
           event.target.closest('#metrics') || 
           event.target.closest('#app-header') ||
-          event.target.closest('#nav-widget')) return;
+          event.target.closest('#nav-widget') ||
+          event.target.closest('#controls-wrapper')) return;
 
       mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
       mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
@@ -747,7 +813,7 @@
       update3DScene();
     });
 
-    // --- 9. BUCLE ANIMACIÓN ---
+    // --- 8. BUCLE ANIMACIÓN ---
     function animate() {
       requestAnimationFrame(animate);
       controls.update();
