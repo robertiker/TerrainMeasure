@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Medidor Inercial 3D PWA - Edición</title>
+  <title>Medidor Inercial 3D PWA - ViewCube</title>
   <style>
     body {
       margin: 0;
@@ -38,6 +38,38 @@
     .metric { text-align: center; }
     .metric span { display: block; font-size: 1.1rem; font-weight: bold; color: #4caf50; }
     
+    /* Widget de Navegación: Botón Home + ViewCube */
+    #nav-widget {
+      pointer-events: auto;
+      position: absolute;
+      top: 70px;
+      right: 15px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      z-index: 10;
+    }
+    #btn-home {
+      background: rgba(45, 45, 45, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 6px;
+      color: #fff;
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 1.2rem;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+    }
+    #viewcube-container {
+      width: 100px;
+      height: 100px;
+      cursor: pointer;
+    }
+
     /* Panel flotante de selección de punto */
     #selection-card {
       pointer-events: auto;
@@ -50,7 +82,7 @@
       border: 1px solid #ff9800;
       padding: 12px 20px;
       border-radius: 8px;
-      display: none; /* Oculto por defecto */
+      display: none;
       flex-direction: column;
       align-items: center;
       gap: 8px;
@@ -106,7 +138,13 @@
       <div class="metric">Área (2D): <span id="lbl-area">-- m²</span></div>
     </div>
 
-    <!-- Menú contextual al seleccionar un punto -->
+    <!-- Contenedor del Botón Home + Cubo 3D de Navegación -->
+    <div id="nav-widget">
+      <button id="btn-home" title="Vista Superior (Home)">🏠</button>
+      <div id="viewcube-container"></div>
+    </div>
+
+    <!-- Menú contextual de selección de punto -->
     <div id="selection-card">
       <span id="lbl-selected-info">Punto #1 seleccionado</span>
       <div style="display: flex; gap: 8px;">
@@ -130,14 +168,13 @@
 
     // --- ESTADO Y VARIABLES GLOBALES ---
     const points = [];
-    let selectedIndex = -1; // Índice del punto seleccionado (-1 = ninguno)
+    let selectedIndex = -1;
     let isClosed = false;
 
-    // Raycasting para detección de clics/toques en objetos 3D
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
 
-    // --- CONFIGURACIÓN DE TRES.JS ---
+    // --- 1. ESCENA PRINCIPAL THREE.JS ---
     const canvas = document.getElementById('canvas3d');
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x121212);
@@ -167,7 +204,109 @@
     scene.add(lineGroup);
     scene.add(nodeGroup);
 
-    // --- DIBUJADO DE LA ESCENA 3D ---
+    // --- 2. ESCENA SECUNDARIA: VIEWCUBE (CUBO DE ORIENTACIÓN) ---
+    const cubeContainer = document.getElementById('viewcube-container');
+    const cubeScene = new THREE.Scene();
+    const cubeCamera = new THREE.PerspectiveCamera(45, 1, 0.1, 10);
+    cubeCamera.position.set(0, 0, 4);
+
+    const cubeRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    cubeRenderer.setSize(100, 100);
+    cubeContainer.appendChild(cubeRenderer.domElement);
+
+    cubeScene.add(new THREE.AmbientLight(0xffffff, 0.8));
+
+    // Función auxiliar para crear texturas con texto dinámico para las caras
+    function createCubeFaceTexture(text) {
+      const canvasText = document.createElement('canvas');
+      canvasText.width = 128;
+      canvasText.height = 128;
+      const ctx = canvasText.getContext('2d');
+      
+      ctx.fillStyle = '#3a3a3a';
+      ctx.fillRect(0, 0, 128, 128);
+      
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 6;
+      ctx.strokeRect(0, 0, 128, 128);
+      
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'Bold 20px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, 64, 64);
+      
+      return new THREE.CanvasTexture(canvasText);
+    }
+
+    // Caras del cubo en orden: +X (Derecha), -X (Izquierda), +Y (Superior), -Y (Inferior), +Z (Frontal), -Z (Posterior)
+    const materials = [
+      new THREE.MeshBasicMaterial({ map: createCubeFaceTexture('Derecha'), userData: 'right' }),
+      new THREE.MeshBasicMaterial({ map: createCubeFaceTexture('Izquierda'), userData: 'left' }),
+      new THREE.MeshBasicMaterial({ map: createCubeFaceTexture('Superior'), userData: 'top' }),
+      new THREE.MeshBasicMaterial({ map: createCubeFaceTexture('Inferior'), userData: 'bottom' }),
+      new THREE.MeshBasicMaterial({ map: createCubeFaceTexture('Frontal'), userData: 'front' }),
+      new THREE.MeshBasicMaterial({ map: createCubeFaceTexture('Posterior'), userData: 'back' })
+    ];
+
+    const cubeGeo = new THREE.BoxGeometry(1.5, 1.5, 1.5);
+    const viewCubeMesh = new THREE.Mesh(cubeGeo, materials);
+    cubeScene.add(viewCubeMesh);
+
+    // Detección de clic en el ViewCube
+    const cubeRaycaster = new THREE.Raycaster();
+    const cubeMouse = new THREE.Vector2();
+
+    cubeContainer.addEventListener('pointerdown', (event) => {
+      const rect = cubeContainer.getBoundingClientRect();
+      cubeMouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      cubeMouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+      cubeRaycaster.setFromCamera(cubeMouse, cubeCamera);
+      const intersects = cubeRaycaster.intersectObject(viewCubeMesh);
+
+      if (intersects.length > 0) {
+        const faceIndex = intersects[0].face.materialIndex;
+        const faceType = materials[faceIndex].userData;
+        setCameraView(faceType);
+      }
+    });
+
+    // --- 3. FUNCIONES DE POSICIONAMIENTO DE CÁMARA ---
+    function setCameraView(view) {
+      const target = controls.target.clone();
+      const dist = 12; // Distancia estándar
+
+      switch (view) {
+        case 'top':
+          camera.position.set(target.x, target.y + dist, target.z + 0.001);
+          break;
+        case 'front':
+          camera.position.set(target.x, target.y, target.z + dist);
+          break;
+        case 'back':
+          camera.position.set(target.x, target.y, target.z - dist);
+          break;
+        case 'right':
+          camera.position.set(target.x + dist, target.y, target.z);
+          break;
+        case 'left':
+          camera.position.set(target.x - dist, target.y, target.z);
+          break;
+        case 'bottom':
+          camera.position.set(target.x, target.y - dist, target.z + 0.001);
+          break;
+      }
+      controls.update();
+    }
+
+    // Botón HOME: Coloca la cámara desde ARRIBA (Vista en Planta 2D)
+    document.getElementById('btn-home').addEventListener('click', () => {
+      setCameraView('top');
+    });
+
+
+    // --- 4. DIBUJADO Y LOGICA DE LA ESCENA 3D ---
     function update3DScene() {
       lineGroup.clear();
       nodeGroup.clear();
@@ -180,30 +319,28 @@
 
       if (points.length === 0) return;
 
-      // 1. DIBUJAR PUNTOS / NODOS
+      // Nodos
       const sphereGeo = new THREE.SphereGeometry(0.12, 16, 16);
       points.forEach((p, index) => {
-        let color = 0x2196f3; // Azul estándar
+        let color = 0x2196f3;
         let scale = 1.0;
 
         if (index === selectedIndex) {
-          color = 0xff9800; // Naranja (Seleccionado)
-          scale = 1.5;      // Más grande para destacar
+          color = 0xff9800;
+          scale = 1.5;
         } else if (index === 0) {
-          color = 0xf44336; // Rojo (Origen)
+          color = 0xf44336;
         }
 
         const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.3 });
         const sphere = new THREE.Mesh(sphereGeo, mat);
         sphere.position.copy(p);
         sphere.scale.setScalar(scale);
-        
-        // Guardamos el índice dentro del objeto para identificarlo en el Raycaster
-        sphere.userData = { pointIndex: index }; 
+        sphere.userData = { pointIndex: index };
         nodeGroup.add(sphere);
       });
 
-      // 2. DIBUJAR LÍNEAS DE UNIÓN
+      // Líneas
       if (points.length > 1) {
         const linePoints = [...points];
         if (isClosed) linePoints.push(points[0]);
@@ -216,85 +353,47 @@
         lineGroup.add(new THREE.Line(lineGeo, lineMat));
       }
 
-// 3. GENERAR MALLA 3D REAL (TIPO RED TOPOGRÁFICA / TERRENO)
-if (isClosed && points.length >= 3) {
-  // A) Crear un array de posiciones (X, Y, Z) a partir de nuestros puntos 3D reales
-  const vertices = [];
-  points.forEach(p => {
-    vertices.push(p.x, p.y, p.z);
-  });
+      // Plano Relleno
+      if (isClosed && points.length >= 3) {
+        const shape = new THREE.Shape();
+        shape.moveTo(points[0].x, points[0].z);
+        for (let i = 1; i < points.length; i++) {
+          shape.lineTo(points[i].x, points[i].z);
+        }
 
-  // B) Algoritmo de Triangulación en Abanico (Fan Triangulation) desde el punto central
-  // Calculamos el centroide 3D (promedio de todos los puntos) para que la malla converja al centro
-  const center = new THREE.Vector3();
-  points.forEach(p => center.add(p));
-  center.divideScalar(points.length);
+        const shapeGeo = new THREE.ShapeGeometry(shape);
+        shapeGeo.rotateX(Math.PI / 2);
 
-  // Añadimos el punto central al final del array de vértices
-  vertices.push(center.x, center.y, center.z);
-  const centerIndex = points.length;
+        const shapeMat = new THREE.MeshBasicMaterial({
+          color: 0x4caf50,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.35
+        });
 
-  // C) Generar los índices de los triángulos que forman la cara 3D
-  const indices = [];
-  for (let i = 0; i < points.length; i++) {
-    const nextIndex = (i + 1) % points.length;
-    // Cada triángulo se forma entre: Punto Actual, Punto Siguiente y el Centroide
-    indices.push(i, nextIndex, centerIndex);
-  }
+        meshSurface = new THREE.Mesh(shapeGeo, shapeMat);
+        meshSurface.position.y = 0.001;
+        scene.add(meshSurface);
+      }
+    }
 
-  // D) Construir la Geometría Customizada en Three.js
-  const customGeo = new THREE.BufferGeometry();
-  customGeo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-  customGeo.setIndex(indices);
-  customGeo.computeVertexNormals(); // Para que responda correctamente a la luz 3D
-
-  // E) Material de la Malla (Líneas Verdes Neón)
-  const wireframeGeo = new THREE.WireframeGeometry(customGeo);
-  const wireframeMat = new THREE.LineBasicMaterial({
-    color: 0x00ff88,       // Verde brillante técnico
-    linewidth: 2,
-    transparent: true,
-    opacity: 0.95
-  });
-  const wireframeMesh = new THREE.LineSegments(wireframeGeo, wireframeMat);
-
-  // F) Material de la Cara Traslúcida (Sombra de relleno)
-  const fillMat = new THREE.MeshStandardMaterial({
-    color: 0x1b5e20,
-    side: THREE.DoubleSide,
-    transparent: true,
-    opacity: 0.35,
-    roughness: 0.5
-  });
-  meshSurface = new THREE.Mesh(customGeo, fillMat);
-
-  // Unir la malla 3D al polígono
-  meshSurface.add(wireframeMesh);
-  scene.add(meshSurface);
-}
-}
-
-    // --- DETECCIÓN DE CLIC Y SELECCIÓN (RAYCASTING) ---
+    // --- Raycasting para seleccionar puntos ---
     function onPointerDown(event) {
-      // Ignorar clics sobre botones e interfaz superior
-      if (event.target.tagName === 'BUTTON' || event.target.closest('#metrics')) return;
+      if (event.target.tagName === 'BUTTON' || 
+          event.target.closest('#metrics') || 
+          event.target.closest('#nav-widget')) return;
 
-      // Convertir la coordenada del toque/clic a coordenadas normalizadas (-1 a +1)
       mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
       mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
       raycaster.setFromCamera(mouse, camera);
-      // Evaluamos colisión con los nodos (esferas)
       const intersects = raycaster.intersectObjects(nodeGroup.children);
 
       if (intersects.length > 0) {
-        // Obtenemos el índice del punto pulsado
         const hitObject = intersects[0].object;
         selectedIndex = hitObject.userData.pointIndex;
-        
         showSelectionCard(true);
       } else {
-        // Si se pulsa en el espacio vacío, deseleccionamos
         selectedIndex = -1;
         showSelectionCard(false);
       }
@@ -313,21 +412,13 @@ if (isClosed && points.length >= 3) {
       }
     }
 
-    // --- LÓGICA DE BORRADO DE PUNTOS ---
     document.getElementById('btnDeletePoint').addEventListener('click', () => {
       if (selectedIndex === -1) return;
-
-      // Se elimina el punto seleccionado del arreglo
-      // JavaScript une automáticamente los puntos contiguos restante (i-1 con i+1)
       points.splice(selectedIndex, 1);
-      
       selectedIndex = -1;
       showSelectionCard(false);
 
-      // Si quedan menos de 3 puntos, el plano ya no puede permanecer cerrado
-      if (points.length < 3) {
-        isClosed = false;
-      }
+      if (points.length < 3) isClosed = false;
 
       updateMetrics();
       update3DScene();
@@ -339,7 +430,6 @@ if (isClosed && points.length >= 3) {
       update3DScene();
     });
 
-    // --- MÉTRICAS Y EVENTOS ESTÁNDAR ---
     function updateMetrics() {
       document.getElementById('lbl-pts').innerText = points.length;
       document.getElementById('btnClose').disabled = points.length < 3 || isClosed;
@@ -366,7 +456,7 @@ if (isClosed && points.length >= 3) {
       }
     }
 
-    // Simulación de entrada de datos 3D
+    // Datos de simulación
     const demoPath3D = [
       new THREE.Vector3(0, 0, 0),
       new THREE.Vector3(4, 0, 0),
@@ -411,11 +501,16 @@ if (isClosed && points.length >= 3) {
       update3DScene();
     });
 
-    // Bucle de renderizado
+    // --- 5. BUCLE DE ANIMACIÓN Y SINCRONIZACIÓN VIEWCUBE ---
     function animate() {
       requestAnimationFrame(animate);
       controls.update();
+
+      // Sincronización del ViewCube con la orientación de la cámara principal
+      viewCubeMesh.quaternion.copy(camera.quaternion).invert();
+
       renderer.render(scene, camera);
+      cubeRenderer.render(cubeScene, cubeCamera);
     }
     animate();
 
