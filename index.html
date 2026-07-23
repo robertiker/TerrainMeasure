@@ -216,28 +216,44 @@
         lineGroup.add(new THREE.Line(lineGeo, lineMat));
       }
 
-      // 3. RELLENO DE PLANO
-      if (isClosed && points.length >= 3) {
-        const shape = new THREE.Shape();
-        shape.moveTo(points[0].x, points[0].z);
-        for (let i = 1; i < points.length; i++) {
-          shape.lineTo(points[i].x, points[i].z);
-        }
+// 3. GENERAR SUPERFICIE CON MALLA TIPO TERRENO (WIREFRAME + RETAZO)
+if (isClosed && points.length >= 3) {
+  // Crear la forma 2D del polígono
+  const shape = new THREE.Shape();
+  shape.moveTo(points[0].x, points[0].z);
+  for (let i = 1; i < points.length; i++) {
+    shape.lineTo(points[i].x, points[i].z);
+  }
 
-        const shapeGeo = new THREE.ShapeGeometry(shape);
-        shapeGeo.rotateX(Math.PI / 2);
+  // Generar la geometría triangulada
+  const shapeGeo = new THREE.ShapeGeometry(shape);
+  shapeGeo.rotateX(Math.PI / 2); // Orientar horizontalmente
 
-        const shapeMat = new THREE.MeshBasicMaterial({
-          color: 0x4caf50,
-          side: THREE.DoubleSide,
-          transparent: true,
-          opacity: 0.35
-        });
+  // --- CAPA 1: Superficie traslúcida base ---
+  const fillMat = new THREE.MeshStandardMaterial({
+    color: 0x2e7d32,       // Verde oscuro técnico
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.3,
+    roughness: 0.8
+  });
+  meshSurface = new THREE.Mesh(shapeGeo, fillMat);
+  meshSurface.position.y = 0.001; // Para evitar z-fighting con el suelo
 
-        meshSurface = new THREE.Mesh(shapeGeo, shapeMat);
-        meshSurface.position.y = 0.001;
-        scene.add(meshSurface);
-      }
+  // --- CAPA 2: Malla Topográfica (Wireframe Overlay) ---
+  const wireframeGeo = new THREE.WireframeGeometry(shapeGeo);
+  const wireframeMat = new THREE.LineBasicMaterial({
+    color: 0x81c784,       // Verde claro brillante para resaltar las cotas
+    linewidth: 1.5,
+    transparent: true,
+    opacity: 0.8
+  });
+  const wireframeMesh = new THREE.LineSegments(wireframeGeo, wireframeMat);
+
+  // Unir la malla al objeto de superficie principal
+  meshSurface.add(wireframeMesh);
+  scene.add(meshSurface);
+}
     }
 
     // --- DETECCIÓN DE CLIC Y SELECCIÓN (RAYCASTING) ---
