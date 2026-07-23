@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>GeoMeasure 3D</title>
 
-  <!-- PWA & Favicon Config (Usando la imagen del logo) -->
+  <!-- PWA & Favicon Config -->
   <link rel="icon" type="image/png" id="app-favicon" href="">
   <link rel="apple-touch-icon" id="apple-icon" href="">
   <meta name="theme-color" content="#121212">
@@ -47,14 +47,14 @@
       border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     }
     #app-logo {
-      width: 38px;
-      height: 38px;
-      border-radius: 8px;
+      width: 42px;
+      height: 42px;
+      border-radius: 10px;
       object-fit: cover;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.5);
     }
     #app-title {
-      font-size: 1.1rem;
+      font-size: 1.15rem;
       font-weight: 800;
       background: linear-gradient(135deg, #00e676, #2196f3);
       -webkit-background-clip: text;
@@ -77,7 +77,7 @@
     #nav-widget {
       pointer-events: auto;
       position: absolute;
-      top: 125px;
+      top: 130px;
       right: 15px;
       display: flex;
       flex-direction: column;
@@ -110,7 +110,7 @@
     #selection-card {
       pointer-events: auto;
       position: absolute;
-      top: 135px;
+      top: 140px;
       left: 50%;
       transform: translateX(-50%);
       background: rgba(33, 33, 33, 0.95);
@@ -170,13 +170,11 @@
 
   <div id="ui-container">
     <div>
-      <!-- Header con Logo -->
       <div id="app-header">
         <img id="app-logo" src="" alt="GeoMeasure Logo">
         <h1 id="app-title">GeoMeasure 3D</h1>
       </div>
 
-      <!-- Métricas -->
       <div id="metrics">
         <div class="metric">Puntos: <span id="lbl-pts">0</span></div>
         <div class="metric">Perímetro 3D: <span id="lbl-per">0.00 m</span></div>
@@ -211,13 +209,127 @@
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-    // --- CARGA DEL LOGO / ICONO DESDE LA IMAGEN GENERADA ---
-    // Colocamos una imagen en canvas temporal para inyectarla como Favicon y Logo PWA
-    const logoImgUrl = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'><rect width='128' height='128' rx='28' fill='%232196f3'/><circle cx='64' cy='64' r='48' fill='%231565c0'/><path d='M35 80 L55 45 L90 55 L95 85 L65 95 Z' fill='%2300e676' stroke='%23ffffff' stroke-width='4'/></svg>";
+    // --- GENERADOR DEL LOGO / ICONO FIDELIDAD HD ---
+    function buildDetailedLogo() {
+      const c = document.createElement('canvas');
+      c.width = 256;
+      c.height = 256;
+      const ctx = c.getContext('2d');
 
-    document.getElementById('app-logo').src = logoImgUrl;
-    document.getElementById('app-favicon').href = logoImgUrl;
-    document.getElementById('apple-icon').href = logoImgUrl;
+      // 1. Marco iOS redondeado azul con degradado
+      const bgGrad = ctx.createLinearGradient(0, 0, 256, 256);
+      bgGrad.addColorStop(0, '#42a5f5');
+      bgGrad.addColorStop(1, '#1565c0');
+      
+      ctx.beginPath();
+      ctx.roundRect(0, 0, 256, 256, 56);
+      ctx.fillStyle = bgGrad;
+      ctx.fill();
+
+      // 2. Círculo de Radar Central
+      const radarGrad = ctx.createRadialGradient(128, 128, 10, 128, 128, 90);
+      radarGrad.addColorStop(0, '#0d47a1');
+      radarGrad.addColorStop(1, '#0a2463');
+      ctx.beginPath();
+      ctx.arc(128, 128, 92, 0, Math.PI * 2);
+      ctx.fillStyle = radarGrad;
+      ctx.fill();
+      ctx.strokeStyle = '#1e88e5';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      // Anillos y cuadrícula del radar
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(128, 128, 60, 0, Math.PI * 2);
+      ctx.arc(128, 128, 30, 0, Math.PI * 2);
+      ctx.moveTo(128, 36); ctx.lineTo(128, 220);
+      ctx.moveTo(36, 128); ctx.lineTo(220, 128);
+      ctx.stroke();
+
+      // 3. Polígono Verde Brillante (Plano medido)
+      ctx.save();
+      const polyGrad = ctx.createLinearGradient(80, 80, 180, 180);
+      polyGrad.addColorStop(0, '#76ff03');
+      polyGrad.addColorStop(1, '#00c853');
+
+      ctx.beginPath();
+      ctx.moveTo(120, 75);
+      ctx.lineTo(170, 85);
+      ctx.lineTo(150, 165);
+      ctx.lineTo(85, 175);
+      ctx.lineTo(100, 130);
+      ctx.lineTo(135, 120);
+      ctx.closePath();
+
+      ctx.fillStyle = polyGrad;
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 5;
+      ctx.stroke();
+      ctx.restore();
+
+      // 4. Cinta Métrica blanca (Esquina superior izquierda)
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(100, 80, 14, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#76ff03';
+      ctx.beginPath();
+      ctx.arc(100, 80, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(110, 82, 16, 8);
+
+      // 5. Cota Lateral con regla
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(178, 85);
+      ctx.lineTo(158, 165);
+      ctx.stroke();
+
+      // Nodos de cota
+      ctx.fillStyle = '#ffffff';
+      [ {x:178, y:85}, {x:168, y:125}, {x:158, y:165} ].forEach(pt => {
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // 6. Etiqueta Flotante (4.2 KM²)
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.roundRect(165, 115, 62, 22, 6);
+      ctx.fill();
+      ctx.strokeStyle = '#1565c0';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      ctx.fillStyle = '#0d47a1';
+      ctx.font = 'Bold 10px system-ui, sans-serif';
+      ctx.fillText('4.2 KM²', 173, 130);
+
+      // 7. Flecha de Norte
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'Bold 10px system-ui, sans-serif';
+      ctx.fillText('N°', 124, 202);
+      ctx.beginPath();
+      ctx.moveTo(128, 205);
+      ctx.lineTo(122, 218);
+      ctx.lineTo(128, 214);
+      ctx.lineTo(134, 218);
+      ctx.closePath();
+      ctx.fill();
+
+      return c.toDataURL('image/png');
+    }
+
+    const highResLogo = buildDetailedLogo();
+    document.getElementById('app-logo').src = highResLogo;
+    document.getElementById('app-favicon').href = highResLogo;
+    document.getElementById('apple-icon').href = highResLogo;
 
     // --- ESTADO GLOBAL ---
     const points = [];
@@ -227,7 +339,7 @@
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
 
-    // --- 1. ESCENA PRINCIPAL THREE.JS ---
+    // --- 1. ESCENA PRINCIPAL ---
     const canvas = document.getElementById('canvas3d');
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x121212);
@@ -396,7 +508,6 @@
 
       if (points.length === 0) return;
 
-      // Nodos
       const sphereGeo = new THREE.SphereGeometry(0.12, 16, 16);
       points.forEach((p, index) => {
         let color = 0x2196f3;
@@ -416,7 +527,6 @@
         sphere.userData = { pointIndex: index };
         nodeGroup.add(sphere);
 
-        // Plomadas verticales
         if (Math.abs(p.y) > 0.05) {
           const dropPoints = [p.clone(), new THREE.Vector3(p.x, 0, p.z)];
           const dropGeo = new THREE.BufferGeometry().setFromPoints(dropPoints);
@@ -431,7 +541,6 @@
         }
       });
 
-      // Líneas 3D
       if (points.length > 1) {
         const linePoints = [...points];
         if (isClosed) linePoints.push(points[0]);
@@ -444,7 +553,6 @@
         lineGroup.add(new THREE.Line(lineGeo, lineMat));
       }
 
-      // Proyección 2D Suelo
       if (points.length > 1) {
         const projPoints = points.map(p => new THREE.Vector3(p.x, 0, p.z));
         if (isClosed) projPoints.push(projPoints[0]);
@@ -454,9 +562,7 @@
         projectionGroup.add(new THREE.Line(projLineGeo, projLineMat));
       }
 
-      // Superficies
       if (isClosed && points.length >= 3) {
-        // Planta 2D
         const shape2D = new THREE.Shape();
         shape2D.moveTo(points[0].x, points[0].z);
         for (let i = 1; i < points.length; i++) {
@@ -475,7 +581,6 @@
         meshSurface2D.position.y = 0.001;
         scene.add(meshSurface2D);
 
-        // Relieve 3D
         const vertices = [];
         points.forEach(p => vertices.push(p.x, p.y, p.z));
 
@@ -519,7 +624,7 @@
       }
     }
 
-    // --- 5. GENERADOR DE ARCHIVOS DXF ---
+    // --- 5. GENERADOR DXF ---
     function generateDXF(pointsList, closed) {
       let dxf = [];
       dxf.push("0", "SECTION", "2", "HEADER", "0", "ENDSEC");
