@@ -3,7 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Medidor Inercial 3D - Exportación DXF</title>
+  <title>GeoMeasure 3D</title>
+
+  <!-- PWA & Favicon Config (Usando la imagen del logo) -->
+  <link rel="icon" type="image/png" id="app-favicon" href="">
+  <link rel="apple-touch-icon" id="apple-icon" href="">
+  <meta name="theme-color" content="#121212">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
   <style>
     body {
       margin: 0;
@@ -26,22 +34,50 @@
       justify-content: space-between;
       box-sizing: border-box;
     }
+    
+    /* Header con Logo e Identidad Visual */
+    #app-header {
+      pointer-events: auto;
+      padding: 10px 16px;
+      background: rgba(20, 20, 20, 0.9);
+      backdrop-filter: blur(10px);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    #app-logo {
+      width: 38px;
+      height: 38px;
+      border-radius: 8px;
+      object-fit: cover;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    }
+    #app-title {
+      font-size: 1.1rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #00e676, #2196f3);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin: 0;
+    }
+
     #metrics {
       pointer-events: auto;
-      padding: 12px;
+      padding: 10px;
       background: rgba(30, 30, 30, 0.85);
       backdrop-filter: blur(8px);
       display: flex;
       justify-content: space-around;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     }
     .metric { text-align: center; }
-    .metric span { display: block; font-size: 1.1rem; font-weight: bold; color: #4caf50; }
+    .metric span { display: block; font-size: 1.05rem; font-weight: bold; color: #00e676; }
     
     #nav-widget {
       pointer-events: auto;
       position: absolute;
-      top: 70px;
+      top: 125px;
       right: 15px;
       display: flex;
       flex-direction: column;
@@ -74,7 +110,7 @@
     #selection-card {
       pointer-events: auto;
       position: absolute;
-      top: 80px;
+      top: 135px;
       left: 50%;
       transform: translateX(-50%);
       background: rgba(33, 33, 33, 0.95);
@@ -93,8 +129,8 @@
     #controls {
       pointer-events: auto;
       padding: 16px;
-      background: rgba(30, 30, 30, 0.85);
-      backdrop-filter: blur(8px);
+      background: rgba(20, 20, 20, 0.9);
+      backdrop-filter: blur(10px);
       display: flex;
       gap: 10px;
       justify-content: center;
@@ -112,7 +148,7 @@
     }
     button:active { opacity: 0.7; }
     .btn-sim { background: #2196f3; color: #fff; }
-    .btn-close { background: #4caf50; color: #fff; }
+    .btn-close { background: #00e676; color: #000; }
     .btn-export { background: #9c27b0; color: #fff; }
     .btn-delete { background: #e91e63; color: #fff; }
     .btn-cancel { background: #666; color: #fff; }
@@ -121,7 +157,6 @@
     #canvas3d { width: 100vw; height: 100vh; display: block; }
   </style>
 
-  <!-- Importación limpia de Three.js -->
   <script type="importmap">
     {
       "imports": {
@@ -134,10 +169,19 @@
 <body>
 
   <div id="ui-container">
-    <div id="metrics">
-      <div class="metric">Puntos: <span id="lbl-pts">0</span></div>
-      <div class="metric">Perímetro 3D: <span id="lbl-per">0.00 m</span></div>
-      <div class="metric">Área Planta (2D): <span id="lbl-area">-- m²</span></div>
+    <div>
+      <!-- Header con Logo -->
+      <div id="app-header">
+        <img id="app-logo" src="" alt="GeoMeasure Logo">
+        <h1 id="app-title">GeoMeasure 3D</h1>
+      </div>
+
+      <!-- Métricas -->
+      <div id="metrics">
+        <div class="metric">Puntos: <span id="lbl-pts">0</span></div>
+        <div class="metric">Perímetro 3D: <span id="lbl-per">0.00 m</span></div>
+        <div class="metric">Área Planta: <span id="lbl-area">-- m²</span></div>
+      </div>
     </div>
 
     <div id="nav-widget">
@@ -167,6 +211,14 @@
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
+    // --- CARGA DEL LOGO / ICONO DESDE LA IMAGEN GENERADA ---
+    // Colocamos una imagen en canvas temporal para inyectarla como Favicon y Logo PWA
+    const logoImgUrl = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'><rect width='128' height='128' rx='28' fill='%232196f3'/><circle cx='64' cy='64' r='48' fill='%231565c0'/><path d='M35 80 L55 45 L90 55 L95 85 L65 95 Z' fill='%2300e676' stroke='%23ffffff' stroke-width='4'/></svg>";
+
+    document.getElementById('app-logo').src = logoImgUrl;
+    document.getElementById('app-favicon').href = logoImgUrl;
+    document.getElementById('apple-icon').href = logoImgUrl;
+
     // --- ESTADO GLOBAL ---
     const points = [];
     let selectedIndex = -1;
@@ -175,7 +227,7 @@
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
 
-    // --- 1. ESCENA PRINCIPAL ---
+    // --- 1. ESCENA PRINCIPAL THREE.JS ---
     const canvas = document.getElementById('canvas3d');
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x121212);
@@ -191,7 +243,6 @@
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
 
-    // Grid de la escena 3D
     const gridHelper = new THREE.GridHelper(20, 20, 0x444444, 0x222222);
     scene.add(gridHelper);
 
@@ -403,7 +454,7 @@
         projectionGroup.add(new THREE.Line(projLineGeo, projLineMat));
       }
 
-      // Superficies (Relleno y Relieve)
+      // Superficies
       if (isClosed && points.length >= 3) {
         // Planta 2D
         const shape2D = new THREE.Shape();
@@ -468,28 +519,25 @@
       }
     }
 
-    // --- 5. GENERADOR DE ARCHIVOS DXF (CAD) NATIVO EN JS ---
+    // --- 5. GENERADOR DE ARCHIVOS DXF ---
     function generateDXF(pointsList, closed) {
       let dxf = [];
       dxf.push("0", "SECTION", "2", "HEADER", "0", "ENDSEC");
       dxf.push("0", "SECTION", "2", "TABLES");
       
-      // Capas
       dxf.push("0", "TABLE", "2", "LAYER");
-      dxf.push("0", "LAYER", "2", "PLANTA_2D", "70", "0", "62", "4"); // Cyan
-      dxf.push("0", "LAYER", "2", "RELIEVE_3D", "70", "0", "62", "3"); // Verde
-      dxf.push("0", "LAYER", "2", "PUNTOS", "70", "0", "62", "1"); // Rojo
+      dxf.push("0", "LAYER", "2", "PLANTA_2D", "70", "0", "62", "4");
+      dxf.push("0", "LAYER", "2", "RELIEVE_3D", "70", "0", "62", "3");
+      dxf.push("0", "LAYER", "2", "PUNTOS", "70", "0", "62", "1");
       dxf.push("0", "ENDTAB", "0", "ENDSEC");
       
       dxf.push("0", "SECTION", "2", "ENTITIES");
 
-      // Exportar Puntos
       pointsList.forEach(p => {
         dxf.push("0", "POINT", "8", "PUNTOS");
         dxf.push("10", p.x.toFixed(4), "20", p.z.toFixed(4), "30", p.y.toFixed(4));
       });
 
-      // Exportar Lneas 3D (Relieve)
       const loop3D = [...pointsList];
       if (closed) loop3D.push(pointsList[0]);
 
@@ -501,7 +549,6 @@
         dxf.push("11", p2.x.toFixed(4), "21", p2.z.toFixed(4), "31", p2.y.toFixed(4));
       }
 
-      // Exportar Líneas Planta 2D (Suelo Y=0)
       for (let i = 0; i < loop3D.length - 1; i++) {
         const p1 = loop3D[i];
         const p2 = loop3D[i + 1];
@@ -516,12 +563,11 @@
 
     document.getElementById('btnExportDXF').addEventListener('click', () => {
       if (points.length < 2) return;
-
       const dxfContent = generateDXF(points, isClosed);
       const blob = new Blob([dxfContent], { type: 'application/dxf' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = `Medicion_Inercial_${new Date().toISOString().slice(0,10)}.dxf`;
+      link.download = `GeoMeasure_${new Date().toISOString().slice(0,10)}.dxf`;
       link.click();
       URL.revokeObjectURL(link.href);
     });
@@ -530,6 +576,7 @@
     function onPointerDown(event) {
       if (event.target.tagName === 'BUTTON' || 
           event.target.closest('#metrics') || 
+          event.target.closest('#app-header') ||
           event.target.closest('#nav-widget')) return;
 
       mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
