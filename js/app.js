@@ -387,7 +387,7 @@ function update3DScene() {
   }
 }
 
-// --- 7. RENDER DEL GRÁFICO DIÉDRICO 3D Y DATOS EN EL MODAL "i" ---
+// --- 7. RENDER DEL GRÁFICO Y DATOS EN EL MODAL "i" ---
 let infoRenderer = null;
 let infoScene = null;
 let infoCamera = null;
@@ -395,9 +395,23 @@ let infoCamera = null;
 function renderInfoModal() {
   const title = document.getElementById('info-title');
   const statsContainer = document.getElementById('info-stats-container');
+  const container = document.querySelector('.canvas-preview-container');
+
+  // RECREACIÓN LIMPIA DEL CANVAS PARA REINICIAR CONTEXTO 2D/WebGL
+  if (infoRenderer) {
+    infoRenderer.dispose();
+    infoRenderer = null;
+  }
+  container.innerHTML = '<canvas id="previewCanvas"></canvas>';
   const pCanvas = document.getElementById('previewCanvas');
 
   if (points.length === 0) {
+    const ctx = pCanvas.getContext('2d');
+    pCanvas.width = 800; pCanvas.height = 440;
+    ctx.fillStyle = '#666';
+    ctx.font = '30px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Sin datos de medición aún', 400, 220);
     statsContainer.innerHTML = `<div class="stat-box" style="grid-column: span 2;"><label>Estado</label><span>Añade puntos para ver el informe</span></div>`;
     return;
   }
@@ -437,7 +451,7 @@ function renderInfoModal() {
   }
   else if (currentMode === 'distance') {
     title.innerText = 'Informe de Distancias Lineales';
-    drawDihedral3DPreview(pCanvas);
+    drawDistancePreview2D(pCanvas);
 
     let totalDist = 0;
     for (let i = 1; i < points.length; i++) totalDist += points[i].distanceTo(points[i - 1]);
@@ -467,28 +481,22 @@ function renderInfoModal() {
   }
 }
 
-// --- DIBUJAR PERSPECTIVA DIÉDRICA 3D TOPOGRÁFICA (BLOQUE CON MAPA DE CALOR Y FALDES GRISES) ---
+// DIBUJAR VISTA DIÉDRICA 3D TOPOGRÁFICA
 function drawDihedral3DPreview(canvasEl) {
   const width = canvasEl.clientWidth || 400;
   const height = 220;
 
-  if (!infoRenderer) {
-    infoRenderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true, alpha: true });
-  }
+  infoRenderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true, alpha: true });
   infoRenderer.setSize(width, height);
   infoRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
   infoScene = new THREE.Scene();
   infoScene.background = new THREE.Color(0x181818);
 
-  // Cámara Isométrica / Diédrica Axonométrica
   const aspect = width / height;
   const d = 8;
   infoCamera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 0.1, 1000);
-  infoCamera.position.set(10, 12, 10);
-  infoCamera.lookAt(0, 0, 0);
 
-  // Rejilla de Plano Diédrico
   const grid = new THREE.GridHelper(16, 16, 0x888888, 0x333333);
   grid.position.y = -0.01;
   infoScene.add(grid);
@@ -515,7 +523,6 @@ function drawDihedral3DPreview(canvasEl) {
     if (isPointInPolygon([cx, cz], points)) validIndices.push(ia, ib, ic);
   }
 
-  // 1. CALCULAR RANGO DE ALTURAS PARA MAPA DE CALOR (Azul -> Verde -> Amarillo -> Rojo)
   let minY = Math.min(...allPoints.map(p => p.y));
   let maxY = Math.max(...allPoints.map(p => p.y));
   const rangeY = (maxY - minY) || 1;
@@ -524,16 +531,15 @@ function drawDihedral3DPreview(canvasEl) {
     const t = (y - minY) / rangeY;
     const color = new THREE.Color();
     if (t < 0.33) {
-      color.setHSL(0.66 - (t / 0.33) * 0.33, 1, 0.5); // Azul a Verde
+      color.setHSL(0.66 - (t / 0.33) * 0.33, 1, 0.5);
     } else if (t < 0.66) {
-      color.setHSL(0.33 - ((t - 0.33) / 0.33) * 0.16, 1, 0.5); // Verde a Amarillo
+      color.setHSL(0.33 - ((t - 0.33) / 0.33) * 0.16, 1, 0.5);
     } else {
-      color.setHSL(0.17 - ((t - 0.66) / 0.34) * 0.17, 1, 0.5); // Amarillo a Rojo
+      color.setHSL(0.17 - ((t - 0.66) / 0.34) * 0.17, 1, 0.5);
     }
     return color;
   }
 
-  // 2. CONSTRUIR MALLA SUPERIOR CON COLOR DE VÉRTICE (MAPA DE CALOR)
   const vertices = [];
   const colors = [];
 
@@ -549,14 +555,9 @@ function drawDihedral3DPreview(canvasEl) {
   topGeo.setIndex(validIndices);
   topGeo.computeVertexNormals();
 
-  const topMat = new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    side: THREE.DoubleSide,
-    roughness: 0.4
-  });
+  const topMat = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.4 });
   const topMesh = new THREE.Mesh(topGeo, topMat);
 
-  // Malla Alámbrica Negra Superior
   const wireframeGeo = new THREE.WireframeGeometry(topGeo);
   const wireframeMat = new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 1.5 });
   const wireframeMesh = new THREE.LineSegments(wireframeGeo, wireframeMat);
@@ -564,7 +565,6 @@ function drawDihedral3DPreview(canvasEl) {
 
   infoScene.add(topMesh);
 
-  // 3. FALDES/PAREDES LATERALES GRISES DIÉDRICAS (Paredes desde cota hasta el suelo Y=0)
   const sideVertices = [];
   const sideIndices = [];
   let sIdx = 0;
@@ -574,11 +574,10 @@ function drawDihedral3DPreview(canvasEl) {
     const p1 = points[i];
     const p2 = points[nextI];
 
-    // 4 vértices del cuadrilátero lateral
-    sideVertices.push(p1.x, p1.y, p1.z); // Superior 1
-    sideVertices.push(p2.x, p2.y, p2.z); // Superior 2
-    sideVertices.push(p1.x, 0, p1.z);    // Base 1
-    sideVertices.push(p2.x, 0, p2.z);    // Base 2
+    sideVertices.push(p1.x, p1.y, p1.z);
+    sideVertices.push(p2.x, p2.y, p2.z);
+    sideVertices.push(p1.x, 0, p1.z);
+    sideVertices.push(p2.x, 0, p2.z);
 
     sideIndices.push(sIdx, sIdx + 2, sIdx + 1);
     sideIndices.push(sIdx + 1, sIdx + 2, sIdx + 3);
@@ -591,21 +590,15 @@ function drawDihedral3DPreview(canvasEl) {
   sideGeo.setIndex(sideIndices);
   sideGeo.computeVertexNormals();
 
-  const sideMat = new THREE.MeshStandardMaterial({
-    color: 0xaaaaaa,
-    side: THREE.DoubleSide,
-    roughness: 0.6
-  });
+  const sideMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, side: THREE.DoubleSide, roughness: 0.6 });
   const sideMesh = new THREE.Mesh(sideGeo, sideMat);
 
-  // Bordes negros de los faldones verticales
   const sideWireGeo = new THREE.WireframeGeometry(sideGeo);
   const sideWireMesh = new THREE.LineSegments(sideWireGeo, wireframeMat);
   sideMesh.add(sideWireMesh);
 
   infoScene.add(sideMesh);
 
-  // Centrar la cámara en el objeto
   const center = new THREE.Vector3();
   allPoints.forEach(p => center.add(p));
   center.divideScalar(allPoints.length);
@@ -616,7 +609,54 @@ function drawDihedral3DPreview(canvasEl) {
   infoRenderer.render(infoScene, infoCamera);
 }
 
-// Dibujar Perfil Altimétrico (Elevación)
+// DIBUJAR CROQUIS 2D DE DISTANCIAS
+function drawDistancePreview2D(canvasEl) {
+  const ctx = canvasEl.getContext('2d');
+  const rect = canvasEl.getBoundingClientRect();
+  canvasEl.width = (rect.width || 400) * 2;
+  canvasEl.height = 220 * 2;
+  const w = canvasEl.width;
+  const h = canvasEl.height;
+
+  ctx.clearRect(0, 0, w, h);
+
+  let minX = Math.min(...points.map(p=>p.x)), maxX = Math.max(...points.map(p=>p.x));
+  let minZ = Math.min(...points.map(p=>p.z)), maxZ = Math.max(...points.map(p=>p.z));
+
+  const pad = 50;
+  const rangeX = (maxX - minX) || 1;
+  const rangeZ = (maxZ - minZ) || 1;
+  const scale = Math.min((w - pad * 2) / rangeX, (h - pad * 2) / rangeZ);
+
+  const toScreen = (p) => ({
+    x: w / 2 + (p.x - (minX + maxX) / 2) * scale,
+    y: h / 2 + (p.z - (minZ + maxZ) / 2) * scale
+  });
+
+  ctx.strokeStyle = '#222'; ctx.lineWidth = 1;
+  for(let x = 0; x < w; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+  for(let y = 0; y < h; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+
+  if (points.length > 1) {
+    ctx.beginPath();
+    const p0 = toScreen(points[0]);
+    ctx.moveTo(p0.x, p0.y);
+    for(let i = 1; i < points.length; i++) {
+      const pt = toScreen(points[i]);
+      ctx.lineTo(pt.x, pt.y);
+    }
+    ctx.strokeStyle = '#2196f3'; ctx.lineWidth = 5; ctx.stroke();
+  }
+
+  points.forEach((p, i) => {
+    const pt = toScreen(p);
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, 8, 0, Math.PI * 2);
+    ctx.fillStyle = i === 0 ? '#f44336' : '#2196f3'; ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+  });
+}
+
+// DIBUJAR PERFIL ALTIMÉTRICO (ELEVACIÓN)
 function drawElevationPreview2D(canvasEl) {
   const ctx = canvasEl.getContext('2d');
   const rect = canvasEl.getBoundingClientRect();
@@ -673,6 +713,7 @@ function drawElevationPreview2D(canvasEl) {
   });
 }
 
+// --- 8. ACTUALIZACIÓN DE MÉTRICAS ---
 function updateMetrics() {
   document.getElementById('btnClose').disabled = currentMode !== 'polygon' || points.length < 3 || isClosed;
   document.getElementById('btnAddManual').disabled = currentMode !== 'polygon' || !isClosed;
@@ -733,7 +774,7 @@ function updateMetrics() {
   }
 }
 
-// --- 8. EXPORTAR A DXF ---
+// --- 9. EXPORTAR A DXF ---
 function generateDXF(perimeterPts, innerPts, closed) {
   let dxf = [];
   dxf.push("0", "SECTION", "2", "HEADER", "0", "ENDSEC");
@@ -773,7 +814,7 @@ document.getElementById('btnExportDXF').addEventListener('click', () => {
   URL.revokeObjectURL(link.href);
 });
 
-// --- 9. INTERACCIÓN Y EVENTOS DE SELECCIÓN ---
+// --- 10. INTERACCIÓN Y EVENTOS DE SELECCIÓN ---
 function onPointerDown(event) {
   if (event.target.tagName === 'BUTTON' || 
       event.target.closest('#metrics') || 
