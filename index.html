@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Medidor Inercial 3D - Relieve y Planta 2D</title>
+  <title>Medidor Inercial 3D - Exportación DXF</title>
   <style>
     body {
       margin: 0;
@@ -113,6 +113,7 @@
     button:active { opacity: 0.7; }
     .btn-sim { background: #2196f3; color: #fff; }
     .btn-close { background: #4caf50; color: #fff; }
+    .btn-export { background: #9c27b0; color: #fff; }
     .btn-delete { background: #e91e63; color: #fff; }
     .btn-cancel { background: #666; color: #fff; }
     .btn-clear { background: #f44336; color: #fff; }
@@ -120,6 +121,7 @@
     #canvas3d { width: 100vw; height: 100vh; display: block; }
   </style>
 
+  <!-- Importación limpia de Three.js -->
   <script type="importmap">
     {
       "imports": {
@@ -154,6 +156,7 @@
     <div id="controls">
       <button class="btn-sim" id="btnAdd">+ Añadir Punto 3D</button>
       <button class="btn-close" id="btnClose" disabled>Cerrar Plano</button>
+      <button class="btn-export" id="btnExportDXF" disabled>💾 Exportar DXF</button>
       <button class="btn-clear" id="btnClear">Limpiar</button>
     </div>
   </div>
@@ -188,7 +191,10 @@
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
 
-    scene.add(new THREE.GridHelper(20, 20, 0x444444, 0x222222));
+    // Grid de la escena 3D
+    const gridHelper = new THREE.GridHelper(20, 20, 0x444444, 0x222222);
+    scene.add(gridHelper);
+
     scene.add(new THREE.AmbientLight(0xffffff, 0.7));
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
     dirLight.position.set(10, 20, 10);
@@ -196,7 +202,7 @@
 
     const lineGroup = new THREE.Group();
     const nodeGroup = new THREE.Group();
-    const projectionGroup = new THREE.Group(); // Para líneas auxiliares y proyección 2D
+    const projectionGroup = new THREE.Group();
     let meshSurface3D = null;
     let meshSurface2D = null;
 
@@ -246,7 +252,7 @@
     const viewCubeMesh = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 1.5), materials);
     cubeScene.add(viewCubeMesh);
 
-    // --- 3. LÓGICA DE DRAG / CLICK VIEWCUBE ---
+    // --- 3. VIEWCUBE DRAG / CLICK ---
     let isDraggingCube = false;
     let cubeDragDistance = 0;
     let previousPointerPosition = { x: 0, y: 0 };
@@ -318,7 +324,7 @@
 
     document.getElementById('btn-home').addEventListener('click', () => setCameraView('top'));
 
-    // --- 4. RENDERIZADO DEL RELIEVE 3D + PLANTA 2D ---
+    // --- 4. RENDERIZADO DE LA ESCENA ---
     function update3DScene() {
       lineGroup.clear();
       nodeGroup.clear();
@@ -339,7 +345,7 @@
 
       if (points.length === 0) return;
 
-      // A) DIBUJAR PUNTOS / NODOS EN EL ESPACIO 3D
+      // Nodos
       const sphereGeo = new THREE.SphereGeometry(0.12, 16, 16);
       points.forEach((p, index) => {
         let color = 0x2196f3;
@@ -359,7 +365,7 @@
         sphere.userData = { pointIndex: index };
         nodeGroup.add(sphere);
 
-        // Líneas punteadas verticales (Plomadas) desde el punto 3D hacia el suelo Y=0
+        // Plomadas verticales
         if (Math.abs(p.y) > 0.05) {
           const dropPoints = [p.clone(), new THREE.Vector3(p.x, 0, p.z)];
           const dropGeo = new THREE.BufferGeometry().setFromPoints(dropPoints);
@@ -374,7 +380,7 @@
         }
       });
 
-      // B) DIBUJAR LÍNEAS DE CONTORNO EN 3D
+      // Líneas 3D
       if (points.length > 1) {
         const linePoints = [...points];
         if (isClosed) linePoints.push(points[0]);
@@ -387,23 +393,19 @@
         lineGroup.add(new THREE.Line(lineGeo, lineMat));
       }
 
-      // C) DIBUJAR LÍNEAS PROYECTADAS EN EL SUELO (PROYECCIÓN 2D)
+      // Proyección 2D Suelo
       if (points.length > 1) {
         const projPoints = points.map(p => new THREE.Vector3(p.x, 0, p.z));
         if (isClosed) projPoints.push(projPoints[0]);
 
         const projLineGeo = new THREE.BufferGeometry().setFromPoints(projPoints);
-        const projLineMat = new THREE.LineBasicMaterial({
-          color: 0x555555,
-          linewidth: 1.5
-        });
+        const projLineMat = new THREE.LineBasicMaterial({ color: 0x555555, linewidth: 1.5 });
         projectionGroup.add(new THREE.Line(projLineGeo, projLineMat));
       }
 
-      // D) GENERAR RELIEVE 3D + PLANTA 2D TRASLÚCIDA (SI ESTÁ CERRADO)
+      // Superficies (Relleno y Relieve)
       if (isClosed && points.length >= 3) {
-        
-        // --- 1. SUPERFICIE EN PLANTA 2D (SUELO Y = 0) ---
+        // Planta 2D
         const shape2D = new THREE.Shape();
         shape2D.moveTo(points[0].x, points[0].z);
         for (let i = 1; i < points.length; i++) {
@@ -419,14 +421,13 @@
           opacity: 0.25
         });
         meshSurface2D = new THREE.Mesh(shapeGeo2D, fillMat2D);
-        meshSurface2D.position.y = 0.001; // Para evitar z-fighting con la cuadrícula
+        meshSurface2D.position.y = 0.001;
         scene.add(meshSurface2D);
 
-        // --- 2. MALLA DE RELIEVE 3D (TRIANGULACIÓN DE VÉRTICES REALES) ---
+        // Relieve 3D
         const vertices = [];
         points.forEach(p => vertices.push(p.x, p.y, p.z));
 
-        // Punto central (centroide 3D) para la convergencia del relieve
         const center = new THREE.Vector3();
         points.forEach(p => center.add(p));
         center.divideScalar(points.length);
@@ -444,7 +445,6 @@
         geo3D.setIndex(indices);
         geo3D.computeVertexNormals();
 
-        // Malla de líneas de relieve (Wireframe Verde Neón)
         const wireframeGeo = new THREE.WireframeGeometry(geo3D);
         const wireframeMat = new THREE.LineBasicMaterial({
           color: 0x00ff88,
@@ -454,7 +454,6 @@
         });
         const wireframeMesh = new THREE.LineSegments(wireframeGeo, wireframeMat);
 
-        // Superficie sombreada del relieve 3D
         const fillMat3D = new THREE.MeshStandardMaterial({
           color: 0x1b5e20,
           side: THREE.DoubleSide,
@@ -469,7 +468,65 @@
       }
     }
 
-    // --- 5. INTERACCIÓN DE SELECCIÓN DE PUNTOS ---
+    // --- 5. GENERADOR DE ARCHIVOS DXF (CAD) NATIVO EN JS ---
+    function generateDXF(pointsList, closed) {
+      let dxf = [];
+      dxf.push("0", "SECTION", "2", "HEADER", "0", "ENDSEC");
+      dxf.push("0", "SECTION", "2", "TABLES");
+      
+      // Capas
+      dxf.push("0", "TABLE", "2", "LAYER");
+      dxf.push("0", "LAYER", "2", "PLANTA_2D", "70", "0", "62", "4"); // Cyan
+      dxf.push("0", "LAYER", "2", "RELIEVE_3D", "70", "0", "62", "3"); // Verde
+      dxf.push("0", "LAYER", "2", "PUNTOS", "70", "0", "62", "1"); // Rojo
+      dxf.push("0", "ENDTAB", "0", "ENDSEC");
+      
+      dxf.push("0", "SECTION", "2", "ENTITIES");
+
+      // Exportar Puntos
+      pointsList.forEach(p => {
+        dxf.push("0", "POINT", "8", "PUNTOS");
+        dxf.push("10", p.x.toFixed(4), "20", p.z.toFixed(4), "30", p.y.toFixed(4));
+      });
+
+      // Exportar Lneas 3D (Relieve)
+      const loop3D = [...pointsList];
+      if (closed) loop3D.push(pointsList[0]);
+
+      for (let i = 0; i < loop3D.length - 1; i++) {
+        const p1 = loop3D[i];
+        const p2 = loop3D[i + 1];
+        dxf.push("0", "LINE", "8", "RELIEVE_3D");
+        dxf.push("10", p1.x.toFixed(4), "20", p1.z.toFixed(4), "30", p1.y.toFixed(4));
+        dxf.push("11", p2.x.toFixed(4), "21", p2.z.toFixed(4), "31", p2.y.toFixed(4));
+      }
+
+      // Exportar Líneas Planta 2D (Suelo Y=0)
+      for (let i = 0; i < loop3D.length - 1; i++) {
+        const p1 = loop3D[i];
+        const p2 = loop3D[i + 1];
+        dxf.push("0", "LINE", "8", "PLANTA_2D");
+        dxf.push("10", p1.x.toFixed(4), "20", p1.z.toFixed(4), "30", "0.0000");
+        dxf.push("11", p2.x.toFixed(4), "21", p2.z.toFixed(4), "31", "0.0000");
+      }
+
+      dxf.push("0", "ENDSEC", "0", "EOF");
+      return dxf.join("\n");
+    }
+
+    document.getElementById('btnExportDXF').addEventListener('click', () => {
+      if (points.length < 2) return;
+
+      const dxfContent = generateDXF(points, isClosed);
+      const blob = new Blob([dxfContent], { type: 'application/dxf' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `Medicion_Inercial_${new Date().toISOString().slice(0,10)}.dxf`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    });
+
+    // --- 6. INTERACCIÓN Y MÉTRICAS ---
     function onPointerDown(event) {
       if (event.target.tagName === 'BUTTON' || 
           event.target.closest('#metrics') || 
@@ -523,8 +580,8 @@
     function updateMetrics() {
       document.getElementById('lbl-pts').innerText = points.length;
       document.getElementById('btnClose').disabled = points.length < 3 || isClosed;
+      document.getElementById('btnExportDXF').disabled = points.length < 2;
 
-      // Perímetro 3D real
       let perimeter = 0;
       for (let i = 1; i < points.length; i++) {
         perimeter += points[i].distanceTo(points[i - 1]);
@@ -534,7 +591,6 @@
       }
       document.getElementById('lbl-per').innerText = perimeter.toFixed(2) + ' m';
 
-      // Área plana proyectada 2D (Suelo)
       if (isClosed && points.length >= 3) {
         let area = 0;
         for (let i = 0; i < points.length; i++) {
@@ -548,12 +604,11 @@
       }
     }
 
-    // Datos de prueba con desniveles reales en altura (Y)
     const demoPath3D = [
       new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(4, 0.8, 0),    // Sube 0.8m
-      new THREE.Vector3(4, 1.5, -3),   // Sube 1.5m
-      new THREE.Vector3(1, 0.4, -3),   // Baja a 0.4m
+      new THREE.Vector3(4, 0.8, 0),
+      new THREE.Vector3(4, 1.5, -3),
+      new THREE.Vector3(1, 0.4, -3),
       new THREE.Vector3(0, 0, -5)
     ];
     let simIdx = 0;
@@ -567,7 +622,7 @@
         const last = points[points.length - 1];
         points.push(new THREE.Vector3(
           last.x + (Math.random() - 0.3) * 2,
-          last.y + (Math.random() - 0.4) * 0.6, // Variación de relieve
+          last.y + (Math.random() - 0.4) * 0.6,
           last.z + (Math.random() - 0.3) * 2
         ));
       }
@@ -593,7 +648,7 @@
       update3DScene();
     });
 
-    // --- 6. BUCLE DE ANIMACIÓN ---
+    // --- 7. BUCLE ANIMACIÓN ---
     function animate() {
       requestAnimationFrame(animate);
       controls.update();
