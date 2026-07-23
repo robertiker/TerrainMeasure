@@ -397,19 +397,18 @@ function renderInfoModal() {
   const statsContainer = document.getElementById('info-stats-container');
   const container = document.querySelector('.canvas-preview-container');
 
-  // RECREACIÓN LIMPIA DEL CANVAS PARA REINICIAR CONTEXTO 2D/WebGL
   if (infoRenderer) {
     infoRenderer.dispose();
     infoRenderer = null;
   }
-  container.innerHTML = '<canvas id="previewCanvas"></canvas>';
+  container.innerHTML = '<canvas id="previewCanvas" style="width:100%; height:220px; display:block;"></canvas>';
   const pCanvas = document.getElementById('previewCanvas');
 
   if (points.length === 0) {
     const ctx = pCanvas.getContext('2d');
     pCanvas.width = 800; pCanvas.height = 440;
     ctx.fillStyle = '#666';
-    ctx.font = '30px system-ui, sans-serif';
+    ctx.font = '24px system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('Sin datos de medición aún', 400, 220);
     statsContainer.innerHTML = `<div class="stat-box" style="grid-column: span 2;"><label>Estado</label><span>Añade puntos para ver el informe</span></div>`;
@@ -484,127 +483,169 @@ function renderInfoModal() {
 // DIBUJAR VISTA DIÉDRICA 3D TOPOGRÁFICA
 function drawDihedral3DPreview(canvasEl) {
   const width = canvasEl.clientWidth || 400;
-  const height = 220;
+  const height = canvasEl.clientHeight || 220;
 
   infoRenderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true, alpha: true });
-  infoRenderer.setSize(width, height);
+  infoRenderer.setSize(width, height, false);
   infoRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
   infoScene = new THREE.Scene();
   infoScene.background = new THREE.Color(0x181818);
 
-  const aspect = width / height;
-  const d = 8;
-  infoCamera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 0.1, 1000);
+  const allPoints = [...points, ...innerPoints];
+  if (allPoints.length === 0) return;
 
-  const grid = new THREE.GridHelper(16, 16, 0x888888, 0x333333);
-  grid.position.y = -0.01;
+  // Cálculo de caja envolvente para adaptar cámara y zoom automáticamente
+  const box = new THREE.Box3();
+  allPoints.forEach(p => box.expandByPoint(p));
+  const center = new THREE.Vector3();
+  box.getCenter(center);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+
+  const maxDim = Math.max(size.x, size.y, size.z, 2);
+  const aspect = width / height;
+  const d = maxDim * 0.9;
+
+  infoCamera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 0.1, 1000);
+  infoCamera.position.set(center.x + maxDim * 1.3, center.y + maxDim * 1.2, center.z + maxDim * 1.3);
+  infoCamera.lookAt(center);
+
+  // Rejilla técnica de base
+  const gridSize = Math.max(maxDim * 2.5, 12);
+  const grid = new THREE.GridHelper(gridSize, 16, 0x666666, 0x333333);
+  grid.position.set(center.x, 0, center.z);
   infoScene.add(grid);
 
   infoScene.add(new THREE.AmbientLight(0xffffff, 0.8));
-  const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
-  dirLight.position.set(5, 10, 7);
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+  dirLight.position.set(center.x + 10, center.y + 20, center.z + 10);
   infoScene.add(dirLight);
 
-  if (points.length < 3 || !isClosed) return;
-
-  const allPoints = [...points, ...innerPoints];
-  const coords2D = allPoints.map(p => [p.x, p.z]);
-  const delaunay = Delaunay.from(coords2D);
-  const rawTriangles = delaunay.triangles;
-
-  const validIndices = [];
-  for (let i = 0; i < rawTriangles.length; i += 3) {
-    const ia = rawTriangles[i], ib = rawTriangles[i+1], ic = rawTriangles[i+2];
-    const pa = allPoints[ia], pb = allPoints[ib], pc = allPoints[ic];
-    const cx = (pa.x + pb.x + pc.x) / 3;
-    const cz = (pa.z + pb.z + pc.z) / 3;
-
-    if (isPointInPolygon([cx, cz], points)) validIndices.push(ia, ib, ic);
-  }
-
-  let minY = Math.min(...allPoints.map(p => p.y));
-  let maxY = Math.max(...allPoints.map(p => p.y));
-  const rangeY = (maxY - minY) || 1;
-
-  function getHeatmapColor(y) {
-    const t = (y - minY) / rangeY;
-    const color = new THREE.Color();
-    if (t < 0.33) {
-      color.setHSL(0.66 - (t / 0.33) * 0.33, 1, 0.5);
-    } else if (t < 0.66) {
-      color.setHSL(0.33 - ((t - 0.33) / 0.33) * 0.16, 1, 0.5);
-    } else {
-      color.setHSL(0.17 - ((t - 0.66) / 0.34) * 0.17, 1, 0.5);
-    }
-    return color;
-  }
-
-  const vertices = [];
-  const colors = [];
-
-  allPoints.forEach(p => {
-    vertices.push(p.x, p.y, p.z);
-    const c = getHeatmapColor(p.y);
-    colors.push(c.r, c.g, c.b);
+  // Nodos 3D
+  const sphereGeo = new THREE.SphereGeometry(maxDim * 0.025 || 0.12, 16, 16);
+  points.forEach((p, i) => {
+    const mat = new THREE.MeshStandardMaterial({ color: i === 0 ? 0xf44336 : 0x2196f3 });
+    const sp = new THREE.Mesh(sphereGeo, mat);
+    sp.position.copy(p);
+    infoScene.add(sp);
   });
 
-  const topGeo = new THREE.BufferGeometry();
-  topGeo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-  topGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  topGeo.setIndex(validIndices);
-  topGeo.computeVertexNormals();
+  innerPoints.forEach(p => {
+    const mat = new THREE.MeshStandardMaterial({ color: 0xff9800 });
+    const sp = new THREE.Mesh(sphereGeo, mat);
+    sp.position.copy(p);
+    infoScene.add(sp);
+  });
 
-  const topMat = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.4 });
-  const topMesh = new THREE.Mesh(topGeo, topMat);
-
-  const wireframeGeo = new THREE.WireframeGeometry(topGeo);
-  const wireframeMat = new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 1.5 });
-  const wireframeMesh = new THREE.LineSegments(wireframeGeo, wireframeMat);
-  topMesh.add(wireframeMesh);
-
-  infoScene.add(topMesh);
-
-  const sideVertices = [];
-  const sideIndices = [];
-  let sIdx = 0;
-
-  for (let i = 0; i < points.length; i++) {
-    const nextI = (i + 1) % points.length;
-    const p1 = points[i];
-    const p2 = points[nextI];
-
-    sideVertices.push(p1.x, p1.y, p1.z);
-    sideVertices.push(p2.x, p2.y, p2.z);
-    sideVertices.push(p1.x, 0, p1.z);
-    sideVertices.push(p2.x, 0, p2.z);
-
-    sideIndices.push(sIdx, sIdx + 2, sIdx + 1);
-    sideIndices.push(sIdx + 1, sIdx + 2, sIdx + 3);
-
-    sIdx += 4;
+  // Trazado de líneas 3D
+  if (points.length > 1) {
+    const linePts = [...points];
+    if (isClosed) linePts.push(points[0]);
+    const lineGeo = new THREE.BufferGeometry().setFromPoints(linePts);
+    const lineMat = new THREE.LineBasicMaterial({ color: isClosed ? 0x00e676 : 0x2196f3, linewidth: 3 });
+    infoScene.add(new THREE.Line(lineGeo, lineMat));
   }
 
-  const sideGeo = new THREE.BufferGeometry();
-  sideGeo.setAttribute('position', new THREE.Float32BufferAttribute(sideVertices, 3));
-  sideGeo.setIndex(sideIndices);
-  sideGeo.computeVertexNormals();
+  // Triangulación y Render de Superficie Topográfica + Paredes
+  if (points.length >= 3) {
+    const coords2D = allPoints.map(p => [p.x, p.z]);
+    const delaunay = Delaunay.from(coords2D);
+    const rawTriangles = delaunay.triangles;
 
-  const sideMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, side: THREE.DoubleSide, roughness: 0.6 });
-  const sideMesh = new THREE.Mesh(sideGeo, sideMat);
+    const validIndices = [];
+    for (let i = 0; i < rawTriangles.length; i += 3) {
+      const ia = rawTriangles[i], ib = rawTriangles[i+1], ic = rawTriangles[i+2];
+      const pa = allPoints[ia], pb = allPoints[ib], pc = allPoints[ic];
+      const cx = (pa.x + pb.x + pc.x) / 3;
+      const cz = (pa.z + pb.z + pc.z) / 3;
 
-  const sideWireGeo = new THREE.WireframeGeometry(sideGeo);
-  const sideWireMesh = new THREE.LineSegments(sideWireGeo, wireframeMat);
-  sideMesh.add(sideWireMesh);
+      if (!isClosed || isPointInPolygon([cx, cz], points)) {
+        validIndices.push(ia, ib, ic);
+      }
+    }
 
-  infoScene.add(sideMesh);
+    if (validIndices.length > 0) {
+      let minY = Math.min(...allPoints.map(p => p.y));
+      let maxY = Math.max(...allPoints.map(p => p.y));
+      const rangeY = (maxY - minY) || 1;
 
-  const center = new THREE.Vector3();
-  allPoints.forEach(p => center.add(p));
-  center.divideScalar(allPoints.length);
+      function getHeatmapColor(y) {
+        const t = (y - minY) / rangeY;
+        const color = new THREE.Color();
+        if (t < 0.33) {
+          color.setHSL(0.66 - (t / 0.33) * 0.33, 1, 0.5); // Azul a Verde
+        } else if (t < 0.66) {
+          color.setHSL(0.33 - ((t - 0.33) / 0.33) * 0.16, 1, 0.5); // Verde a Amarillo
+        } else {
+          color.setHSL(0.17 - ((t - 0.66) / 0.34) * 0.17, 1, 0.5); // Amarillo a Rojo
+        }
+        return color;
+      }
 
-  infoCamera.lookAt(center);
-  infoCamera.position.set(center.x + 8, center.y + 10, center.z + 8);
+      const vertices = [];
+      const colors = [];
+
+      allPoints.forEach(p => {
+        vertices.push(p.x, p.y, p.z);
+        const c = getHeatmapColor(p.y);
+        colors.push(c.r, c.g, c.b);
+      });
+
+      const topGeo = new THREE.BufferGeometry();
+      topGeo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+      topGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+      topGeo.setIndex(validIndices);
+      topGeo.computeVertexNormals();
+
+      const topMat = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.4 });
+      const topMesh = new THREE.Mesh(topGeo, topMat);
+
+      const wireframeGeo = new THREE.WireframeGeometry(topGeo);
+      const wireframeMat = new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 1.5 });
+      const wireframeMesh = new THREE.LineSegments(wireframeGeo, wireframeMat);
+      topMesh.add(wireframeMesh);
+
+      infoScene.add(topMesh);
+
+      // Paredes / Faldón lateral gris
+      if (isClosed) {
+        const sideVertices = [];
+        const sideIndices = [];
+        let sIdx = 0;
+
+        for (let i = 0; i < points.length; i++) {
+          const nextI = (i + 1) % points.length;
+          const p1 = points[i];
+          const p2 = points[nextI];
+
+          sideVertices.push(p1.x, p1.y, p1.z);
+          sideVertices.push(p2.x, p2.y, p2.z);
+          sideVertices.push(p1.x, 0, p1.z);
+          sideVertices.push(p2.x, 0, p2.z);
+
+          sideIndices.push(sIdx, sIdx + 2, sIdx + 1);
+          sideIndices.push(sIdx + 1, sIdx + 2, sIdx + 3);
+
+          sIdx += 4;
+        }
+
+        const sideGeo = new THREE.BufferGeometry();
+        sideGeo.setAttribute('position', new THREE.Float32BufferAttribute(sideVertices, 3));
+        sideGeo.setIndex(sideIndices);
+        sideGeo.computeVertexNormals();
+
+        const sideMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, side: THREE.DoubleSide, roughness: 0.6 });
+        const sideMesh = new THREE.Mesh(sideGeo, sideMat);
+
+        const sideWireGeo = new THREE.WireframeGeometry(sideGeo);
+        const sideWireMesh = new THREE.LineSegments(sideWireGeo, wireframeMat);
+        sideMesh.add(sideWireMesh);
+
+        infoScene.add(sideMesh);
+      }
+    }
+  }
 
   infoRenderer.render(infoScene, infoCamera);
 }
