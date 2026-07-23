@@ -2,12 +2,11 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Delaunay } from 'd3-delaunay';
 
-// --- 1. GENERACIÓN DEL LOGO HD Y CONFIGURACIÓN PWA ---
+// --- LOGO GENERATOR ---
 function buildDetailedLogo() {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 256;
   const ctx = c.getContext('2d');
-  
   const bgGrad = ctx.createLinearGradient(0, 0, 256, 256);
   bgGrad.addColorStop(0, '#42a5f5'); bgGrad.addColorStop(1, '#1565c0');
   ctx.beginPath(); ctx.roundRect(0, 0, 256, 256, 56); ctx.fillStyle = bgGrad; ctx.fill();
@@ -53,7 +52,8 @@ document.getElementById('app-logo').src = highResLogo;
 document.getElementById('app-favicon').href = highResLogo;
 document.getElementById('apple-icon').href = highResLogo;
 
-// --- 2. ESTADO GLOBAL ---
+// --- ESTADO GLOBAL Y MODOS ---
+let currentMode = 'polygon'; // 'polygon', 'distance', 'elevation'
 const points = [];
 const innerPoints = [];
 let selectedIndex = -1;
@@ -63,7 +63,60 @@ let isClosed = false;
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 
-// --- 3. ESCENA PRINCIPAL THREE.JS ---
+// --- GESTIÓN DE MODOS ---
+const modeButtons = document.querySelectorAll('.mode-btn');
+const welcomeModal = document.getElementById('welcome-modal');
+const modeTag = document.getElementById('mode-tag');
+
+modeButtons.forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    const selected = e.currentTarget.getAttribute('data-mode');
+    setMeasurementMode(selected);
+    welcomeModal.style.display = 'none';
+  });
+});
+
+document.getElementById('btnChangeMode').addEventListener('click', () => {
+  welcomeModal.style.display = 'flex';
+});
+
+function setMeasurementMode(mode) {
+  currentMode = mode;
+  resetData();
+
+  if (mode === 'polygon') {
+    modeTag.innerText = 'Modo: Terreno / Plano';
+    document.getElementById('lbl-m1-title').innerText = 'Puntos Ext';
+    document.getElementById('lbl-m2-title').innerText = 'Puntos Int';
+    document.getElementById('lbl-m3-title').innerText = 'Perímetro 3D';
+    document.getElementById('lbl-m4-title').innerText = 'Área Planta';
+  } else if (mode === 'distance') {
+    modeTag.innerText = 'Modo: Distancias Lineales';
+    document.getElementById('lbl-m1-title').innerText = 'Tramos';
+    document.getElementById('lbl-m2-title').innerText = 'Último Tramo';
+    document.getElementById('lbl-m3-title').innerText = 'Dist. Acumulada';
+    document.getElementById('lbl-m4-title').innerText = 'Dist. Directa A-B';
+  } else if (mode === 'elevation') {
+    modeTag.innerText = 'Modo: Elevaciones (ΔY)';
+    document.getElementById('lbl-m1-title').innerText = 'Cotas';
+    document.getElementById('lbl-m2-title').innerText = 'Desnivel ΔY';
+    document.getElementById('lbl-m3-title').innerText = 'Cota Max';
+    document.getElementById('lbl-m4-title').innerText = 'Cota Min';
+  }
+  updateMetrics();
+  update3DScene();
+}
+
+function resetData() {
+  points.length = 0;
+  innerPoints.length = 0;
+  selectedIndex = -1;
+  isClosed = false;
+  simIdx = 0;
+  showSelectionCard(false);
+}
+
+// --- ESCENA PRINCIPAL THREE.JS ---
 const canvas = document.getElementById('canvas3d');
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x121212);
@@ -95,7 +148,7 @@ scene.add(lineGroup);
 scene.add(nodeGroup);
 scene.add(projectionGroup);
 
-// --- 4. ESCENA VIEWCUBE ---
+// --- VIEWCUBE ---
 const cubeContainer = document.getElementById('viewcube-container');
 const cubeScene = new THREE.Scene();
 const cubeCamera = new THREE.PerspectiveCamera(45, 1, 0.1, 10);
@@ -131,7 +184,6 @@ const materials = [
 const viewCubeMesh = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 1.5), materials);
 cubeScene.add(viewCubeMesh);
 
-// --- 5. VIEWCUBE DRAG / CLICK ---
 let isDraggingCube = false;
 let cubeDragDistance = 0;
 let previousPointerPosition = { x: 0, y: 0 };
@@ -139,8 +191,7 @@ const cubeRaycaster = new THREE.Raycaster();
 const cubeMouse = new THREE.Vector2();
 
 cubeContainer.addEventListener('pointerdown', (e) => {
-  isDraggingCube = true;
-  cubeDragDistance = 0;
+  isDraggingCube = true; cubeDragDistance = 0;
   previousPointerPosition = { x: e.clientX, y: e.clientY };
   cubeContainer.setPointerCapture(e.pointerId);
 });
@@ -201,7 +252,6 @@ function setCameraView(view) {
 
 document.getElementById('btn-home').addEventListener('click', () => setCameraView('top'));
 
-// --- 6. ALGORITMO PUNTO EN POLÍGONO (Para Filtrar Triángulos Internos) ---
 function isPointInPolygon(pt, polygon) {
   const x = pt[0], z = pt[1];
   let inside = false;
@@ -215,32 +265,21 @@ function isPointInPolygon(pt, polygon) {
   return inside;
 }
 
-// --- 7. RENDERIZADO DE LA ESCENA Y MALLA DELAUNAY UNIFICADA ---
+// --- DIBUJADO DE LA ESCENA SEGÚN EL MODO ---
 function update3DScene() {
-  lineGroup.clear();
-  nodeGroup.clear();
-  projectionGroup.clear();
+  lineGroup.clear(); nodeGroup.clear(); projectionGroup.clear();
 
-  if (meshSurface3D) {
-    scene.remove(meshSurface3D);
-    meshSurface3D.geometry.dispose();
-    meshSurface3D.material.dispose();
-    meshSurface3D = null;
-  }
-  if (meshSurface2D) {
-    scene.remove(meshSurface2D);
-    meshSurface2D.geometry.dispose();
-    meshSurface2D.material.dispose();
-    meshSurface2D = null;
-  }
+  if (meshSurface3D) { scene.remove(meshSurface3D); meshSurface3D.geometry.dispose(); meshSurface3D.material.dispose(); meshSurface3D = null; }
+  if (meshSurface2D) { scene.remove(meshSurface2D); meshSurface2D.geometry.dispose(); meshSurface2D.material.dispose(); meshSurface2D = null; }
 
   if (points.length === 0) return;
 
   const sphereGeo = new THREE.SphereGeometry(0.12, 16, 16);
 
-  // Nodos Perímetro
+  // DIBUJAR PUNTOS / NODOS
   points.forEach((p, index) => {
     let color = 0x2196f3;
+    if (currentMode === 'elevation') color = 0x9c27b0; // Púrpura para modo elevación
     let scale = (selectedType === 'outer' && index === selectedIndex) ? (color = 0xff9800, 1.5) : 1.0;
     if (index === 0) color = 0xf44336;
 
@@ -251,23 +290,18 @@ function update3DScene() {
     sphere.userData = { pointIndex: index, type: 'outer' };
     nodeGroup.add(sphere);
 
-    if (Math.abs(p.y) > 0.05) {
-      const dropPoints = [p.clone(), new THREE.Vector3(p.x, 0, p.z)];
-      const dropGeo = new THREE.BufferGeometry().setFromPoints(dropPoints);
-      const dropMat = new THREE.LineDashedMaterial({ color: 0x888888, dashSize: 0.1, gapSize: 0.1 });
-      const dropLine = new THREE.Line(dropGeo, dropMat);
-      dropLine.computeLineDistances();
-      projectionGroup.add(dropLine);
-    }
+    // Plomada vertical
+    const dropPoints = [p.clone(), new THREE.Vector3(p.x, 0, p.z)];
+    const dropGeo = new THREE.BufferGeometry().setFromPoints(dropPoints);
+    const dropMat = new THREE.LineDashedMaterial({ color: 0x888888, dashSize: 0.1, gapSize: 0.1 });
+    const dropLine = new THREE.Line(dropGeo, dropMat);
+    dropLine.computeLineDistances();
+    projectionGroup.add(dropLine);
   });
 
-  // Nodos Interiores
   innerPoints.forEach((p, index) => {
     let color = 0xff9800;
-    let scale = 1.1;
-    if (selectedType === 'inner' && index === selectedIndex) {
-      color = 0xffeb3b; scale = 1.6;
-    }
+    let scale = (selectedType === 'inner' && index === selectedIndex) ? (color = 0xffeb3b, 1.6) : 1.1;
 
     const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.2 });
     const sphere = new THREE.Mesh(sphereGeo, mat);
@@ -284,26 +318,21 @@ function update3DScene() {
     projectionGroup.add(dropLine);
   });
 
-  // Contorno Exterior 3D
+  // DIBUJAR LÍNEAS 3D (TRAMOS O PERÍMETRO)
   if (points.length > 1) {
     const linePoints = [...points];
-    if (isClosed) linePoints.push(points[0]);
+    if (isClosed && currentMode === 'polygon') linePoints.push(points[0]);
+
     const lineGeo = new THREE.BufferGeometry().setFromPoints(linePoints);
-    const lineMat = new THREE.LineBasicMaterial({ color: isClosed ? 0x00e676 : 0x2196f3, linewidth: 3 });
+    const lineMat = new THREE.LineBasicMaterial({
+      color: isClosed ? 0x00e676 : 0x2196f3,
+      linewidth: 3
+    });
     lineGroup.add(new THREE.Line(lineGeo, lineMat));
   }
 
-  // Proyección Suelo 2D
-  if (points.length > 1) {
-    const projPoints = points.map(p => new THREE.Vector3(p.x, 0, p.z));
-    if (isClosed) projPoints.push(projPoints[0]);
-    const projLineGeo = new THREE.BufferGeometry().setFromPoints(projPoints);
-    const projLineMat = new THREE.LineBasicMaterial({ color: 0x555555, linewidth: 1.5 });
-    projectionGroup.add(new THREE.Line(projLineGeo, projLineMat));
-  }
-
-  // Malla Delaunay Unificada
-  if (isClosed && points.length >= 3) {
+  // SOLO MODO PLANO/TERRENO: Generar Malla Unificada Delaunay
+  if (currentMode === 'polygon' && isClosed && points.length >= 3) {
     const shape2D = new THREE.Shape();
     shape2D.moveTo(points[0].x, points[0].z);
     for (let i = 1; i < points.length; i++) shape2D.lineTo(points[i].x, points[i].z);
@@ -317,26 +346,17 @@ function update3DScene() {
 
     const allPoints = [...points, ...innerPoints];
     const coords2D = allPoints.map(p => [p.x, p.z]);
-    
     const delaunay = Delaunay.from(coords2D);
     const rawTriangles = delaunay.triangles;
 
     const validIndices = [];
     for (let i = 0; i < rawTriangles.length; i += 3) {
-      const ia = rawTriangles[i];
-      const ib = rawTriangles[i+1];
-      const ic = rawTriangles[i+2];
-
-      const pa = allPoints[ia];
-      const pb = allPoints[ib];
-      const pc = allPoints[ic];
-
+      const ia = rawTriangles[i], ib = rawTriangles[i+1], ic = rawTriangles[i+2];
+      const pa = allPoints[ia], pb = allPoints[ib], pc = allPoints[ic];
       const cx = (pa.x + pb.x + pc.x) / 3;
       const cz = (pa.z + pb.z + pc.z) / 3;
 
-      if (isPointInPolygon([cx, cz], points)) {
-        validIndices.push(ia, ib, ic);
-      }
+      if (isPointInPolygon([cx, cz], points)) validIndices.push(ia, ib, ic);
     }
 
     const vertices = [];
@@ -358,7 +378,68 @@ function update3DScene() {
   }
 }
 
-// --- 8. EXPORTACIÓN A ARCHIVO DXF ---
+// --- ACTUALIZACIÓN DE MÉTRICAS SEGÚN MODO ---
+function updateMetrics() {
+  document.getElementById('btnClose').disabled = currentMode !== 'polygon' || points.length < 3 || isClosed;
+  document.getElementById('btnAddManual').disabled = currentMode !== 'polygon' || !isClosed;
+  document.getElementById('btnExportDXF').disabled = points.length < 2;
+
+  if (currentMode === 'polygon') {
+    document.getElementById('lbl-m1-val').innerText = points.length + ' pts';
+    document.getElementById('lbl-m2-val').innerText = innerPoints.length + ' pts';
+
+    let perimeter = 0;
+    for (let i = 1; i < points.length; i++) perimeter += points[i].distanceTo(points[i - 1]);
+    if (isClosed && points.length > 2) perimeter += points[points.length - 1].distanceTo(points[0]);
+    document.getElementById('lbl-m3-val').innerText = perimeter.toFixed(2) + ' m';
+
+    if (isClosed && points.length >= 3) {
+      let area = 0;
+      for (let i = 0; i < points.length; i++) {
+        const p1 = points[i], p2 = points[(i + 1) % points.length];
+        area += (p1.x * p2.z) - (p2.x * p1.z);
+      }
+      document.getElementById('lbl-m4-val').innerText = (Math.abs(area) / 2).toFixed(2) + ' m²';
+    } else {
+      document.getElementById('lbl-m4-val').innerText = '-- m²';
+    }
+  } 
+  else if (currentMode === 'distance') {
+    const tramos = points.length > 1 ? points.length - 1 : 0;
+    document.getElementById('lbl-m1-val').innerText = tramos + ' tramos';
+
+    let lastDist = 0;
+    if (points.length > 1) {
+      lastDist = points[points.length - 1].distanceTo(points[points.length - 2]);
+    }
+    document.getElementById('lbl-m2-val').innerText = lastDist.toFixed(2) + ' m';
+
+    let totalDist = 0;
+    for (let i = 1; i < points.length; i++) totalDist += points[i].distanceTo(points[i - 1]);
+    document.getElementById('lbl-m3-val').innerText = totalDist.toFixed(2) + ' m';
+
+    let directDist = 0;
+    if (points.length > 1) directDist = points[0].distanceTo(points[points.length - 1]);
+    document.getElementById('lbl-m4-val').innerText = directDist.toFixed(2) + ' m';
+  } 
+  else if (currentMode === 'elevation') {
+    document.getElementById('lbl-m1-val').innerText = points.length + ' cotas';
+
+    let deltaY = 0;
+    if (points.length > 1) {
+      deltaY = points[points.length - 1].y - points[0].y;
+    }
+    document.getElementById('lbl-m2-val').innerText = (deltaY >= 0 ? '+' : '') + deltaY.toFixed(2) + ' m';
+
+    let maxY = points.length > 0 ? Math.max(...points.map(p => p.y)) : 0;
+    let minY = points.length > 0 ? Math.min(...points.map(p => p.y)) : 0;
+
+    document.getElementById('lbl-m3-val').innerText = maxY.toFixed(2) + ' m';
+    document.getElementById('lbl-m4-val').innerText = minY.toFixed(2) + ' m';
+  }
+}
+
+// --- EXPORTAR A DXF ---
 function generateDXF(perimeterPts, innerPts, closed) {
   let dxf = [];
   dxf.push("0", "SECTION", "2", "HEADER", "0", "ENDSEC");
@@ -376,7 +457,7 @@ function generateDXF(perimeterPts, innerPts, closed) {
   });
 
   const loop3D = [...perimeterPts];
-  if (closed) loop3D.push(perimeterPts[0]);
+  if (closed && currentMode === 'polygon') loop3D.push(perimeterPts[0]);
   for (let i = 0; i < loop3D.length - 1; i++) {
     dxf.push("0", "LINE", "8", "RELIEVE_3D");
     dxf.push("10", loop3D[i].x.toFixed(4), "20", loop3D[i].z.toFixed(4), "30", loop3D[i].y.toFixed(4));
@@ -393,18 +474,19 @@ document.getElementById('btnExportDXF').addEventListener('click', () => {
   const blob = new Blob([dxfContent], { type: 'application/dxf' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.download = `GeoMeasure_Terreno_${new Date().toISOString().slice(0,10)}.dxf`;
+  link.download = `GeoMeasure_${currentMode}_${new Date().toISOString().slice(0,10)}.dxf`;
   link.click();
   URL.revokeObjectURL(link.href);
 });
 
-// --- 9. EVENTOS DE INTERACCIÓN Y MÉTRICAS ---
+// --- INTERACCIÓN Y EVENTOS ---
 function onPointerDown(event) {
   if (event.target.tagName === 'BUTTON' || 
       event.target.closest('#metrics') || 
       event.target.closest('#app-header') ||
       event.target.closest('#nav-widget') ||
-      event.target.closest('#controls-wrapper')) return;
+      event.target.closest('#controls-wrapper') ||
+      event.target.closest('#welcome-modal')) return;
 
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
@@ -429,7 +511,7 @@ window.addEventListener('pointerdown', onPointerDown);
 function showSelectionCard(visible) {
   const card = document.getElementById('selection-card');
   if (visible && selectedIndex !== -1) {
-    document.getElementById('lbl-selected-info').innerText = `Punto ${selectedType === 'outer' ? 'Perímetro' : 'Interior'} #${selectedIndex + 1}`;
+    document.getElementById('lbl-selected-info').innerText = `Punto ${selectedType === 'outer' ? 'Trazado' : 'Interior'} #${selectedIndex + 1}`;
     card.style.display = 'flex';
   } else {
     card.style.display = 'none';
@@ -456,30 +538,7 @@ document.getElementById('btnDeselectPoint').addEventListener('click', () => {
   update3DScene();
 });
 
-function updateMetrics() {
-  document.getElementById('lbl-pts').innerText = points.length + ' pts';
-  document.getElementById('lbl-inner-pts').innerText = innerPoints.length + ' pts';
-  document.getElementById('btnClose').disabled = points.length < 3 || isClosed;
-  document.getElementById('btnAddManual').disabled = !isClosed;
-  document.getElementById('btnExportDXF').disabled = points.length < 2;
-
-  let perimeter = 0;
-  for (let i = 1; i < points.length; i++) perimeter += points[i].distanceTo(points[i - 1]);
-  if (isClosed && points.length > 2) perimeter += points[points.length - 1].distanceTo(points[0]);
-  document.getElementById('lbl-per').innerText = perimeter.toFixed(2) + ' m';
-
-  if (isClosed && points.length >= 3) {
-    let area = 0;
-    for (let i = 0; i < points.length; i++) {
-      const p1 = points[i], p2 = points[(i + 1) % points.length];
-      area += (p1.x * p2.z) - (p2.x * p1.z);
-    }
-    document.getElementById('lbl-area').innerText = (Math.abs(area) / 2).toFixed(2) + ' m²';
-  } else {
-    document.getElementById('lbl-area').innerText = '-- m²';
-  }
-}
-
+// SIMULACIÓN DE RECEPCIÓN DE DATOS IMU 9 EJES
 const demoPath3D = [
   new THREE.Vector3(0, 0, 0),
   new THREE.Vector3(4, 0.8, 0),
@@ -490,26 +549,32 @@ const demoPath3D = [
 let simIdx = 0;
 
 document.getElementById('btnAdd').addEventListener('click', () => {
-  if (isClosed) return;
+  if (currentMode === 'polygon' && isClosed) return;
+
   if (simIdx < demoPath3D.length) {
     points.push(demoPath3D[simIdx++].clone());
   } else {
     const last = points[points.length - 1];
-    points.push(new THREE.Vector3(last.x + (Math.random() - 0.3) * 2, last.y + (Math.random() - 0.4) * 0.6, last.z + (Math.random() - 0.3) * 2));
+    points.push(new THREE.Vector3(
+      last.x + (Math.random() - 0.3) * 2,
+      last.y + (Math.random() - 0.4) * 0.6,
+      last.z + (Math.random() - 0.3) * 2
+    ));
   }
+
   updateMetrics();
   update3DScene();
 });
 
 document.getElementById('btnClose').addEventListener('click', () => {
-  if (points.length < 3) return;
+  if (points.length < 3 || currentMode !== 'polygon') return;
   isClosed = true;
   updateMetrics();
   update3DScene();
 });
 
 document.getElementById('btnAddManual').addEventListener('click', () => {
-  if (!isClosed) return;
+  if (!isClosed || currentMode !== 'polygon') return;
   const center = new THREE.Vector3();
   points.forEach(p => center.add(p));
   center.divideScalar(points.length);
@@ -525,17 +590,12 @@ document.getElementById('btnAddManual').addEventListener('click', () => {
 });
 
 document.getElementById('btnClear').addEventListener('click', () => {
-  points.length = 0;
-  innerPoints.length = 0;
-  selectedIndex = -1;
-  isClosed = false;
-  simIdx = 0;
-  showSelectionCard(false);
+  resetData();
   updateMetrics();
   update3DScene();
 });
 
-// --- 10. BUCLE ANIMACIÓN ---
+// ANIMACIÓN
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
