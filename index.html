@@ -97,7 +97,14 @@
       display: flex; justify-content: space-between; align-items: center;
       border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 10px; margin-bottom: 16px;
     }
-    .info-header h2 { margin: 0; font-size: 1.2rem; color: #ffeb3b; }
+    .info-header h2 { margin: 0; font-size: 1.1rem; color: #ffeb3b; }
+    .header-actions { display: flex; align-items: center; gap: 8px; }
+    .btn-pdf-header {
+      background: #e91e63; color: #fff; border: none; padding: 6px 12px;
+      border-radius: 6px; font-weight: bold; font-size: 0.8rem; cursor: pointer;
+      display: flex; align-items: center; gap: 4px; transition: background 0.2s;
+    }
+    .btn-pdf-header:active { background: #c2185b; }
     .btn-close-modal {
       background: rgba(255,255,255,0.1); border: none; color: #fff;
       width: 32px; height: 32px; border-radius: 50%; font-size: 1.1rem; cursor: pointer;
@@ -118,7 +125,6 @@
     .stat-box label { display: block; font-size: 0.75rem; color: #aaa; margin-bottom: 4px; }
     .stat-box span { font-size: 1.1rem; font-weight: bold; color: #00e676; }
 
-    /* ESTILOS INTERFAZ PRINCIPAL */
     #metrics {
       pointer-events: auto; padding: 10px;
       background: rgba(30, 30, 30, 0.85); backdrop-filter: blur(8px);
@@ -183,12 +189,14 @@
     #canvas3d { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; display: block; z-index: 1; }
   </style>
 
+  <!-- Import Map incluyendo Three.js, D3-Delaunay y jsPDF -->
   <script type="importmap">
     {
       "imports": {
         "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
         "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-        "d3-delaunay": "https://cdn.jsdelivr.net/npm/d3-delaunay@6/+esm"
+        "d3-delaunay": "https://cdn.jsdelivr.net/npm/d3-delaunay@6/+esm",
+        "jspdf": "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/+esm"
       }
     }
   </script>
@@ -229,11 +237,15 @@
     </div>
   </div>
 
+  <!-- MODAL INFORMATIVO CON OPCIÓN PDF -->
   <div id="info-modal">
     <div class="info-card">
       <div class="info-header">
         <h2 id="info-title">Informe de Medición</h2>
-        <button class="btn-close-modal" id="btnCloseInfo">✕</button>
+        <div class="header-actions">
+          <button class="btn-pdf-header" id="btnExportPDF">📄 Exportar PDF</button>
+          <button class="btn-close-modal" id="btnCloseInfo">✕</button>
+        </div>
       </div>
       <div class="info-body">
         <div class="canvas-preview-container">
