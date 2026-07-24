@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Delaunay } from 'd3-delaunay';
+import { jsPDF } from 'jspdf';
 
 // --- 1. GENERADOR DE LOGO HD ---
 function buildDetailedLogo() {
@@ -52,15 +53,13 @@ document.getElementById('app-logo').src = highResLogo;
 document.getElementById('app-favicon').href = highResLogo;
 document.getElementById('apple-icon').href = highResLogo;
 
-// --- GENERADOR DE ETIQUETAS DE TEXTO 3D PARA ESCALAS DE MEDIDA ---
 function createTextSprite(text, colorStr = '#ffffff') {
   const canvasText = document.createElement('canvas');
   canvasText.width = 128; canvasText.height = 64;
   const ctx = canvasText.getContext('2d');
   ctx.fillStyle = colorStr;
   ctx.font = 'Bold 28px system-ui, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText(text, 64, 32);
 
   const texture = new THREE.CanvasTexture(canvasText);
@@ -70,30 +69,21 @@ function createTextSprite(text, colorStr = '#ffffff') {
   return sprite;
 }
 
-// --- CREACIÓN DE EJES Y REGLAS GRADUADAS EN METROS ---
 function createRulerAxes(size = 20) {
   const group = new THREE.Group();
   const axesHelper = new THREE.AxesHelper(size);
   group.add(axesHelper);
 
-  // Marcas de escala cada metro en X, Y, Z
   for (let i = 1; i <= size; i += 2) {
-    // Eje X (Rojo)
     const spX = createTextSprite(`${i}m`, '#ff5252');
-    spX.position.set(i, -0.2, 0);
-    group.add(spX);
+    spX.position.set(i, -0.2, 0); group.add(spX);
 
-    // Eje Y (Verde - Altura)
     const spY = createTextSprite(`${i}m`, '#69f0ae');
-    spY.position.set(-0.3, i, 0);
-    group.add(spY);
+    spY.position.set(-0.3, i, 0); group.add(spY);
 
-    // Eje Z (Azul)
     const spZ = createTextSprite(`${i}m`, '#448aff');
-    spZ.position.set(0, -0.2, i);
-    group.add(spZ);
+    spZ.position.set(0, -0.2, i); group.add(spZ);
   }
-
   return group;
 }
 
@@ -108,12 +98,11 @@ let isClosed = false;
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 
-// ELEMENTOS DOM
 const welcomeModal = document.getElementById('welcome-modal');
 const infoModal = document.getElementById('info-modal');
 const modeTag = document.getElementById('mode-tag');
 
-// --- 3. EVENTOS DEL MODAL INICIAL ---
+// --- 3. EVENTOS ---
 document.querySelectorAll('.mode-btn').forEach(btn => {
   btn.addEventListener('click', (e) => {
     const targetBtn = e.target.closest('.mode-btn');
@@ -141,6 +130,9 @@ document.getElementById('btnCloseInfo').addEventListener('click', () => {
     infoControls = null;
   }
 });
+
+// EXPORTACIÓN A PDF
+document.getElementById('btnExportPDF').addEventListener('click', exportReportPDF);
 
 function setMeasurementMode(mode) {
   currentMode = mode;
@@ -195,7 +187,7 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.05;
 
 scene.add(new THREE.GridHelper(20, 20, 0x444444, 0x222222));
-scene.add(createRulerAxes(20)); // Añadir regla graduada a la pantalla principal
+scene.add(createRulerAxes(20));
 scene.add(new THREE.AmbientLight(0xffffff, 0.7));
 const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
 dirLight.position.set(10, 20, 10);
@@ -536,12 +528,11 @@ function renderInfoModal() {
   }
 }
 
-// DIBUJAR VISTA DIÉDRICA 3D TOPOGRÁFICA INTERACTIVA (GIRABLE Y ROTABLE)
 function drawDihedral3DPreview(canvasEl) {
   const width = canvasEl.clientWidth || 400;
   const height = canvasEl.clientHeight || 220;
 
-  infoRenderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true, alpha: true });
+  infoRenderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true, alpha: true, preserveDrawingBuffer: true });
   infoRenderer.setSize(width, height, false);
   infoRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
@@ -564,14 +555,12 @@ function drawDihedral3DPreview(canvasEl) {
   infoCamera = new THREE.PerspectiveCamera(45, aspect, 0.1, 1000);
   infoCamera.position.set(center.x + maxDim * 1.5, center.y + maxDim * 1.4, center.z + maxDim * 1.5);
 
-  // CONTROLES DE ROTACIÓN Y GIRO CON EL DEDO / RATÓN
   infoControls = new OrbitControls(infoCamera, infoRenderer.domElement);
   infoControls.enableDamping = true;
   infoControls.dampingFactor = 0.05;
   infoControls.target.copy(center);
   infoControls.update();
 
-  // Rejilla y Regla graduada
   const gridSize = Math.max(maxDim * 2.5, 12);
   const grid = new THREE.GridHelper(gridSize, 16, 0x666666, 0x333333);
   grid.position.set(center.x, 0, center.z);
@@ -585,7 +574,6 @@ function drawDihedral3DPreview(canvasEl) {
   dirLight.position.set(center.x + 10, center.y + 20, center.z + 10);
   infoScene.add(dirLight);
 
-  // Nodos 3D
   const sphereGeo = new THREE.SphereGeometry(maxDim * 0.025 || 0.12, 16, 16);
   points.forEach((p, i) => {
     const mat = new THREE.MeshStandardMaterial({ color: i === 0 ? 0xf44336 : 0x2196f3 });
@@ -707,7 +695,6 @@ function drawDihedral3DPreview(canvasEl) {
     }
   }
 
-  // Bucle de animación para rotación interactiva en el modal
   function animateInfo() {
     if (!infoRenderer) return;
     requestAnimationFrame(animateInfo);
@@ -717,7 +704,6 @@ function drawDihedral3DPreview(canvasEl) {
   animateInfo();
 }
 
-// DIBUJAR CROQUIS 2D DE DISTANCIAS CON ESCALA DE MEDIDA
 function drawDistancePreview2D(canvasEl) {
   const ctx = canvasEl.getContext('2d');
   const rect = canvasEl.getBoundingClientRect();
@@ -741,7 +727,6 @@ function drawDistancePreview2D(canvasEl) {
     y: h / 2 + (p.z - (minZ + maxZ) / 2) * scale
   });
 
-  // Rejilla y regla en metros
   ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
   ctx.fillStyle = '#888'; ctx.font = '20px system-ui';
   for(let x = pad; x < w - pad; x += 80) {
@@ -769,7 +754,6 @@ function drawDistancePreview2D(canvasEl) {
   });
 }
 
-// DIBUJAR PERFIL ALTIMÉTRICO (ELEVACIÓN) CON ESCALA GRADUADA
 function drawElevationPreview2D(canvasEl) {
   const ctx = canvasEl.getContext('2d');
   const rect = canvasEl.getBoundingClientRect();
@@ -795,14 +779,12 @@ function drawElevationPreview2D(canvasEl) {
   const scaleX = (w - pad * 2) / maxD;
   const scaleY = (h - pad * 2) / rangeY;
 
-  // Ejes con escala
   ctx.strokeStyle = '#666'; ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(pad, h - pad); ctx.lineTo(w - pad, h - pad);
   ctx.moveTo(pad, pad); ctx.lineTo(pad, h - pad);
   ctx.stroke();
 
-  // Marcas de cota en Y
   ctx.fillStyle = '#ffeb3b'; ctx.font = '18px system-ui';
   ctx.fillText(`${maxY.toFixed(1)}m`, 10, pad + 10);
   ctx.fillText(`${minY.toFixed(1)}m`, 10, h - pad);
@@ -830,6 +812,139 @@ function drawElevationPreview2D(canvasEl) {
     ctx.fillStyle = '#9c27b0'; ctx.fill();
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
   });
+}
+
+// --- FUNCIÓN DE GENERACIÓN Y DESCARGA DE PDF ---
+function exportReportPDF() {
+  if (points.length === 0) {
+    alert("No hay datos de medición para generar el PDF.");
+    return;
+  }
+
+  const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+  const pCanvas = document.getElementById('previewCanvas');
+
+  // Encabezado
+  doc.setFillColor(20, 20, 20);
+  doc.rect(0, 0, 210, 28, 'F');
+
+  doc.setTextColor(0, 230, 118);
+  doc.setFontSize(18);
+  doc.setFont('helvetica', 'bold');
+  doc.text("GeoMeasure 3D - Informe Técnico", 14, 18);
+
+  const dateStr = new Date().toLocaleString('es-ES');
+  doc.setTextColor(180, 180, 180);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Fecha: ${dateStr}`, 145, 18);
+
+  // Modo de Trabajo
+  doc.setTextColor(40, 40, 40);
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  const modeTitle = currentMode === 'polygon' ? 'PLANO CERRADO / TERRENO' :
+                   (currentMode === 'distance' ? 'DISTANCIAS LINEALES' : 'ELEVACIONES / ALTIMETRÍA');
+  doc.text(`TRABAJO: ${modeTitle}`, 14, 38);
+
+  // Captura del Canvas del Modal
+  try {
+    const imgData = pCanvas.toDataURL('image/png');
+    doc.setFillColor(245, 245, 245);
+    doc.rect(14, 42, 182, 95, 'F');
+    doc.addImage(imgData, 'PNG', 15, 43, 180, 93);
+  } catch (err) {
+    console.error("Error al capturar la imagen para el PDF:", err);
+  }
+
+  // Resumen de Métricas
+  doc.setFontSize(12);
+  doc.setTextColor(0, 150, 136);
+  doc.text("Resumen Métrica", 14, 146);
+
+  doc.setLineWidth(0.5);
+  doc.setDrawColor(200, 200, 200);
+  doc.line(14, 148, 196, 148);
+
+  doc.setFontSize(10);
+  doc.setTextColor(50, 50, 50);
+  doc.setFont('helvetica', 'normal');
+
+  let yPos = 156;
+  if (currentMode === 'polygon') {
+    let area = 0;
+    if (isClosed && points.length >= 3) {
+      for (let i = 0; i < points.length; i++) {
+        const p1 = points[i], p2 = points[(i + 1) % points.length];
+        area += (p1.x * p2.z) - (p2.x * p1.z);
+      }
+      area = Math.abs(area) / 2;
+    }
+    let perim3D = 0;
+    for (let i = 1; i < points.length; i++) perim3D += points[i].distanceTo(points[i - 1]);
+    if (isClosed && points.length > 2) perim3D += points[points.length - 1].distanceTo(points[0]);
+
+    const avgY = points.reduce((acc, p) => acc + p.y, 0) / points.length;
+    const volumeEst = area * Math.max(Math.abs(avgY), 0.3);
+
+    doc.text(`• Área en Planta: ${area.toFixed(2)} m²`, 16, yPos);
+    doc.text(`• Volumen Estimado: ${volumeEst.toFixed(2)} m³`, 110, yPos); yPos += 7;
+    doc.text(`• Perímetro 3D: ${perim3D.toFixed(2)} m`, 16, yPos);
+    doc.text(`• Vértices Exterior / Interior: ${points.length} / ${innerPoints.length}`, 110, yPos); yPos += 10;
+  }
+  else if (currentMode === 'distance') {
+    let totalDist = 0;
+    for (let i = 1; i < points.length; i++) totalDist += points[i].distanceTo(points[i - 1]);
+    let directDist = points.length > 1 ? points[0].distanceTo(points[points.length - 1]) : 0;
+
+    doc.text(`• Distancia Acumulada: ${totalDist.toFixed(2)} m`, 16, yPos);
+    doc.text(`• Distancia Directa A-B: ${directDist.toFixed(2)} m`, 110, yPos); yPos += 7;
+    doc.text(`• Número de Tramos: ${points.length > 1 ? points.length - 1 : 0}`, 16, yPos); yPos += 10;
+  }
+  else if (currentMode === 'elevation') {
+    let deltaY = points.length > 1 ? points[points.length - 1].y - points[0].y : 0;
+    let maxY = Math.max(...points.map(p => p.y));
+    let minY = Math.min(...points.map(p => p.y));
+
+    doc.text(`• Desnivel Total (ΔY): ${(deltaY >= 0 ? '+' : '') + deltaY.toFixed(2)} m`, 16, yPos);
+    doc.text(`• Cota Máxima: ${maxY.toFixed(2)} m`, 110, yPos); yPos += 7;
+    doc.text(`• Cota Mínima: ${minY.toFixed(2)} m`, 16, yPos);
+    doc.text(`• Cotas Medidas: ${points.length}`, 110, yPos); yPos += 10;
+  }
+
+  // Tabla de Coordenadas Topográficas (X, Y, Z)
+  doc.setFontSize(12);
+  doc.setTextColor(0, 150, 136);
+  doc.setFont('helvetica', 'bold');
+  doc.text("Coordenadas Topográficas Puntos (X, Y, Z)", 14, yPos); yPos += 3;
+
+  doc.setFillColor(230, 230, 230);
+  doc.rect(14, yPos, 182, 7, 'F');
+  doc.setFontSize(9);
+  doc.setTextColor(0, 0, 0);
+  doc.text("Punto / Tipo", 18, yPos + 5);
+  doc.text("Coord X (m)", 70, yPos + 5);
+  doc.text("Cota Y (m)", 115, yPos + 5);
+  doc.text("Coord Z (m)", 160, yPos + 5);
+  yPos += 8;
+
+  const allPts = [...points.map((p,i)=>({p, name:`P${i+1} Ext`})), ...innerPoints.map((p,i)=>({p, name:`P${i+1} Int`}))];
+  
+  doc.setFont('helvetica', 'normal');
+  allPts.slice(0, 15).forEach((item) => {
+    doc.text(item.name, 18, yPos);
+    doc.text(item.p.x.toFixed(3), 70, yPos);
+    doc.text(item.p.y.toFixed(3), 115, yPos);
+    doc.text(item.p.z.toFixed(3), 160, yPos);
+    yPos += 6;
+  });
+
+  // Pie de Página
+  doc.setFontSize(8);
+  doc.setTextColor(150, 180, 150);
+  doc.text("Generado por GeoMeasure 3D - Aplicación Topográfica PWA", 14, 285);
+
+  doc.save(`GeoMeasure_Informe_${currentMode}_${new Date().toISOString().slice(0,10)}.pdf`);
 }
 
 // --- 8. ACTUALIZACIÓN DE MÉTRICAS ---
