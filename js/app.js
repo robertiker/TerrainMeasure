@@ -52,6 +52,51 @@ document.getElementById('app-logo').src = highResLogo;
 document.getElementById('app-favicon').href = highResLogo;
 document.getElementById('apple-icon').href = highResLogo;
 
+// --- GENERADOR DE ETIQUETAS DE TEXTO 3D PARA ESCALAS DE MEDIDA ---
+function createTextSprite(text, colorStr = '#ffffff') {
+  const canvasText = document.createElement('canvas');
+  canvasText.width = 128; canvasText.height = 64;
+  const ctx = canvasText.getContext('2d');
+  ctx.fillStyle = colorStr;
+  ctx.font = 'Bold 28px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 64, 32);
+
+  const texture = new THREE.CanvasTexture(canvasText);
+  const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true });
+  const sprite = new THREE.Sprite(spriteMat);
+  sprite.scale.set(0.8, 0.4, 1);
+  return sprite;
+}
+
+// --- CREACIÓN DE EJES Y REGLAS GRADUADAS EN METROS ---
+function createRulerAxes(size = 20) {
+  const group = new THREE.Group();
+  const axesHelper = new THREE.AxesHelper(size);
+  group.add(axesHelper);
+
+  // Marcas de escala cada metro en X, Y, Z
+  for (let i = 1; i <= size; i += 2) {
+    // Eje X (Rojo)
+    const spX = createTextSprite(`${i}m`, '#ff5252');
+    spX.position.set(i, -0.2, 0);
+    group.add(spX);
+
+    // Eje Y (Verde - Altura)
+    const spY = createTextSprite(`${i}m`, '#69f0ae');
+    spY.position.set(-0.3, i, 0);
+    group.add(spY);
+
+    // Eje Z (Azul)
+    const spZ = createTextSprite(`${i}m`, '#448aff');
+    spZ.position.set(0, -0.2, i);
+    group.add(spZ);
+  }
+
+  return group;
+}
+
 // --- 2. ESTADO GLOBAL Y MODOS ---
 let currentMode = 'polygon';
 const points = [];
@@ -91,6 +136,10 @@ document.getElementById('btn-info').addEventListener('click', () => {
 
 document.getElementById('btnCloseInfo').addEventListener('click', () => {
   infoModal.style.display = 'none';
+  if (infoControls) {
+    infoControls.dispose();
+    infoControls = null;
+  }
 });
 
 function setMeasurementMode(mode) {
@@ -146,6 +195,7 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.05;
 
 scene.add(new THREE.GridHelper(20, 20, 0x444444, 0x222222));
+scene.add(createRulerAxes(20)); // Añadir regla graduada a la pantalla principal
 scene.add(new THREE.AmbientLight(0xffffff, 0.7));
 const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
 dirLight.position.set(10, 20, 10);
@@ -391,6 +441,7 @@ function update3DScene() {
 let infoRenderer = null;
 let infoScene = null;
 let infoCamera = null;
+let infoControls = null;
 
 function renderInfoModal() {
   const title = document.getElementById('info-title');
@@ -401,7 +452,12 @@ function renderInfoModal() {
     infoRenderer.dispose();
     infoRenderer = null;
   }
-  container.innerHTML = '<canvas id="previewCanvas" style="width:100%; height:220px; display:block;"></canvas>';
+  if (infoControls) {
+    infoControls.dispose();
+    infoControls = null;
+  }
+
+  container.innerHTML = '<canvas id="previewCanvas" style="width:100%; height:220px; display:block; cursor:grab;"></canvas>';
   const pCanvas = document.getElementById('previewCanvas');
 
   if (points.length === 0) {
@@ -416,7 +472,7 @@ function renderInfoModal() {
   }
 
   if (currentMode === 'polygon') {
-    title.innerText = 'Perspectiva Diédrica Topográfica';
+    title.innerText = 'Perspectiva Diédrica Topográfica (3D Rotable)';
     drawDihedral3DPreview(pCanvas);
 
     let area = 0;
@@ -480,7 +536,7 @@ function renderInfoModal() {
   }
 }
 
-// DIBUJAR VISTA DIÉDRICA 3D TOPOGRÁFICA
+// DIBUJAR VISTA DIÉDRICA 3D TOPOGRÁFICA INTERACTIVA (GIRABLE Y ROTABLE)
 function drawDihedral3DPreview(canvasEl) {
   const width = canvasEl.clientWidth || 400;
   const height = canvasEl.clientHeight || 220;
@@ -495,7 +551,6 @@ function drawDihedral3DPreview(canvasEl) {
   const allPoints = [...points, ...innerPoints];
   if (allPoints.length === 0) return;
 
-  // Cálculo de caja envolvente para adaptar cámara y zoom automáticamente
   const box = new THREE.Box3();
   allPoints.forEach(p => box.expandByPoint(p));
   const center = new THREE.Vector3();
@@ -505,17 +560,25 @@ function drawDihedral3DPreview(canvasEl) {
 
   const maxDim = Math.max(size.x, size.y, size.z, 2);
   const aspect = width / height;
-  const d = maxDim * 0.9;
 
-  infoCamera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 0.1, 1000);
-  infoCamera.position.set(center.x + maxDim * 1.3, center.y + maxDim * 1.2, center.z + maxDim * 1.3);
-  infoCamera.lookAt(center);
+  infoCamera = new THREE.PerspectiveCamera(45, aspect, 0.1, 1000);
+  infoCamera.position.set(center.x + maxDim * 1.5, center.y + maxDim * 1.4, center.z + maxDim * 1.5);
 
-  // Rejilla técnica de base
+  // CONTROLES DE ROTACIÓN Y GIRO CON EL DEDO / RATÓN
+  infoControls = new OrbitControls(infoCamera, infoRenderer.domElement);
+  infoControls.enableDamping = true;
+  infoControls.dampingFactor = 0.05;
+  infoControls.target.copy(center);
+  infoControls.update();
+
+  // Rejilla y Regla graduada
   const gridSize = Math.max(maxDim * 2.5, 12);
   const grid = new THREE.GridHelper(gridSize, 16, 0x666666, 0x333333);
   grid.position.set(center.x, 0, center.z);
   infoScene.add(grid);
+
+  const ruler = createRulerAxes(gridSize / 2);
+  infoScene.add(ruler);
 
   infoScene.add(new THREE.AmbientLight(0xffffff, 0.8));
   const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
@@ -538,7 +601,6 @@ function drawDihedral3DPreview(canvasEl) {
     infoScene.add(sp);
   });
 
-  // Trazado de líneas 3D
   if (points.length > 1) {
     const linePts = [...points];
     if (isClosed) linePts.push(points[0]);
@@ -547,7 +609,6 @@ function drawDihedral3DPreview(canvasEl) {
     infoScene.add(new THREE.Line(lineGeo, lineMat));
   }
 
-  // Triangulación y Render de Superficie Topográfica + Paredes
   if (points.length >= 3) {
     const coords2D = allPoints.map(p => [p.x, p.z]);
     const delaunay = Delaunay.from(coords2D);
@@ -574,11 +635,11 @@ function drawDihedral3DPreview(canvasEl) {
         const t = (y - minY) / rangeY;
         const color = new THREE.Color();
         if (t < 0.33) {
-          color.setHSL(0.66 - (t / 0.33) * 0.33, 1, 0.5); // Azul a Verde
+          color.setHSL(0.66 - (t / 0.33) * 0.33, 1, 0.5);
         } else if (t < 0.66) {
-          color.setHSL(0.33 - ((t - 0.33) / 0.33) * 0.16, 1, 0.5); // Verde a Amarillo
+          color.setHSL(0.33 - ((t - 0.33) / 0.33) * 0.16, 1, 0.5);
         } else {
-          color.setHSL(0.17 - ((t - 0.66) / 0.34) * 0.17, 1, 0.5); // Amarillo a Rojo
+          color.setHSL(0.17 - ((t - 0.66) / 0.34) * 0.17, 1, 0.5);
         }
         return color;
       }
@@ -608,7 +669,6 @@ function drawDihedral3DPreview(canvasEl) {
 
       infoScene.add(topMesh);
 
-      // Paredes / Faldón lateral gris
       if (isClosed) {
         const sideVertices = [];
         const sideIndices = [];
@@ -647,10 +707,17 @@ function drawDihedral3DPreview(canvasEl) {
     }
   }
 
-  infoRenderer.render(infoScene, infoCamera);
+  // Bucle de animación para rotación interactiva en el modal
+  function animateInfo() {
+    if (!infoRenderer) return;
+    requestAnimationFrame(animateInfo);
+    infoControls.update();
+    infoRenderer.render(infoScene, infoCamera);
+  }
+  animateInfo();
 }
 
-// DIBUJAR CROQUIS 2D DE DISTANCIAS
+// DIBUJAR CROQUIS 2D DE DISTANCIAS CON ESCALA DE MEDIDA
 function drawDistancePreview2D(canvasEl) {
   const ctx = canvasEl.getContext('2d');
   const rect = canvasEl.getBoundingClientRect();
@@ -664,7 +731,7 @@ function drawDistancePreview2D(canvasEl) {
   let minX = Math.min(...points.map(p=>p.x)), maxX = Math.max(...points.map(p=>p.x));
   let minZ = Math.min(...points.map(p=>p.z)), maxZ = Math.max(...points.map(p=>p.z));
 
-  const pad = 50;
+  const pad = 60;
   const rangeX = (maxX - minX) || 1;
   const rangeZ = (maxZ - minZ) || 1;
   const scale = Math.min((w - pad * 2) / rangeX, (h - pad * 2) / rangeZ);
@@ -674,9 +741,14 @@ function drawDistancePreview2D(canvasEl) {
     y: h / 2 + (p.z - (minZ + maxZ) / 2) * scale
   });
 
-  ctx.strokeStyle = '#222'; ctx.lineWidth = 1;
-  for(let x = 0; x < w; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
-  for(let y = 0; y < h; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+  // Rejilla y regla en metros
+  ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+  ctx.fillStyle = '#888'; ctx.font = '20px system-ui';
+  for(let x = pad; x < w - pad; x += 80) {
+    ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, h - pad); ctx.stroke();
+    const meterVal = ((x - pad) / scale).toFixed(1);
+    ctx.fillText(`${meterVal}m`, x - 15, h - pad + 30);
+  }
 
   if (points.length > 1) {
     ctx.beginPath();
@@ -697,7 +769,7 @@ function drawDistancePreview2D(canvasEl) {
   });
 }
 
-// DIBUJAR PERFIL ALTIMÉTRICO (ELEVACIÓN)
+// DIBUJAR PERFIL ALTIMÉTRICO (ELEVACIÓN) CON ESCALA GRADUADA
 function drawElevationPreview2D(canvasEl) {
   const ctx = canvasEl.getContext('2d');
   const rect = canvasEl.getBoundingClientRect();
@@ -708,7 +780,7 @@ function drawElevationPreview2D(canvasEl) {
 
   ctx.clearRect(0, 0, w, h);
 
-  const pad = 50;
+  const pad = 60;
   let distances = [0];
   let acc = 0;
   for(let i = 1; i < points.length; i++) {
@@ -723,11 +795,17 @@ function drawElevationPreview2D(canvasEl) {
   const scaleX = (w - pad * 2) / maxD;
   const scaleY = (h - pad * 2) / rangeY;
 
-  ctx.strokeStyle = '#444'; ctx.lineWidth = 2;
+  // Ejes con escala
+  ctx.strokeStyle = '#666'; ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(pad, h - pad); ctx.lineTo(w - pad, h - pad);
   ctx.moveTo(pad, pad); ctx.lineTo(pad, h - pad);
   ctx.stroke();
+
+  // Marcas de cota en Y
+  ctx.fillStyle = '#ffeb3b'; ctx.font = '18px system-ui';
+  ctx.fillText(`${maxY.toFixed(1)}m`, 10, pad + 10);
+  ctx.fillText(`${minY.toFixed(1)}m`, 10, h - pad);
 
   ctx.beginPath();
   points.forEach((p, i) => {
