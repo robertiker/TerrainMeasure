@@ -131,7 +131,6 @@ document.getElementById('btnCloseInfo').addEventListener('click', () => {
   }
 });
 
-// EXPORTACIÓN A PDF
 document.getElementById('btnExportPDF').addEventListener('click', exportReportPDF);
 
 function setMeasurementMode(mode) {
@@ -151,9 +150,9 @@ function setMeasurementMode(mode) {
     document.getElementById('lbl-m3-title').innerText = 'Dist. Acumulada';
     document.getElementById('lbl-m4-title').innerText = 'Dist. Directa A-B';
   } else if (mode === 'elevation') {
-    modeTag.innerText = 'Modo: Elevaciones (ΔY)';
+    modeTag.innerText = 'Modo: Elevaciones (ΔZ)';
     document.getElementById('lbl-m1-title').innerText = 'Cotas';
-    document.getElementById('lbl-m2-title').innerText = 'Desnivel ΔY';
+    document.getElementById('lbl-m2-title').innerText = 'Desnivel ΔZ';
     document.getElementById('lbl-m3-title').innerText = 'Cota Max';
     document.getElementById('lbl-m4-title').innerText = 'Cota Min';
   }
@@ -520,9 +519,9 @@ function renderInfoModal() {
     let minY = Math.min(...points.map(p => p.y));
 
     statsContainer.innerHTML = `
-      <div class="stat-box"><label>Desnivel Total ΔY</label><span>${(deltaY >= 0 ? '+' : '') + deltaY.toFixed(2)} m</span></div>
-      <div class="stat-box"><label>Cota Máxima</label><span>${maxY.toFixed(2)} m</span></div>
-      <div class="stat-box"><label>Cota Mínima</label><span>${minY.toFixed(2)} m</span></div>
+      <div class="stat-box"><label>Desnivel Total ΔZ</label><span>${(deltaY >= 0 ? '+' : '') + deltaY.toFixed(2)} m</span></div>
+      <div class="stat-box"><label>Cota Máxima Z</label><span>${maxY.toFixed(2)} m</span></div>
+      <div class="stat-box"><label>Cota Mínima Z</label><span>${minY.toFixed(2)} m</span></div>
       <div class="stat-box"><label>Cotas Medidas</label><span>${points.length}</span></div>
     `;
   }
@@ -814,7 +813,7 @@ function drawElevationPreview2D(canvasEl) {
   });
 }
 
-// --- FUNCIÓN DE GENERACIÓN Y DESCARGA DE PDF ---
+// --- 8. EXPORTACIÓN A PDF CON NORMATIVA TOPOGRÁFICA (Z = ELEVACIÓN) ---
 function exportReportPDF() {
   if (points.length === 0) {
     alert("No hay datos de medición para generar el PDF.");
@@ -831,7 +830,7 @@ function exportReportPDF() {
   doc.setTextColor(0, 230, 118);
   doc.setFontSize(18);
   doc.setFont('helvetica', 'bold');
-  doc.text("GeoMeasure 3D - Informe Técnico", 14, 18);
+  doc.text("GeoMeasure 3D - Informe Técnico Topográfico", 14, 18);
 
   const dateStr = new Date().toLocaleString('es-ES');
   doc.setTextColor(180, 180, 180);
@@ -860,7 +859,7 @@ function exportReportPDF() {
   // Resumen de Métricas
   doc.setFontSize(12);
   doc.setTextColor(0, 150, 136);
-  doc.text("Resumen Métrica", 14, 146);
+  doc.text("Resumen de Métricas", 14, 146);
 
   doc.setLineWidth(0.5);
   doc.setDrawColor(200, 200, 200);
@@ -902,40 +901,47 @@ function exportReportPDF() {
     doc.text(`• Número de Tramos: ${points.length > 1 ? points.length - 1 : 0}`, 16, yPos); yPos += 10;
   }
   else if (currentMode === 'elevation') {
-    let deltaY = points.length > 1 ? points[points.length - 1].y - points[0].y : 0;
-    let maxY = Math.max(...points.map(p => p.y));
-    let minY = Math.min(...points.map(p => p.y));
+    let deltaZ = points.length > 1 ? points[points.length - 1].y - points[0].y : 0; // Cota de elevación
+    let maxZ = Math.max(...points.map(p => p.y));
+    let minZ = Math.min(...points.map(p => p.y));
 
-    doc.text(`• Desnivel Total (ΔY): ${(deltaY >= 0 ? '+' : '') + deltaY.toFixed(2)} m`, 16, yPos);
-    doc.text(`• Cota Máxima: ${maxY.toFixed(2)} m`, 110, yPos); yPos += 7;
-    doc.text(`• Cota Mínima: ${minY.toFixed(2)} m`, 16, yPos);
+    doc.text(`• Desnivel Total (ΔZ): ${(deltaZ >= 0 ? '+' : '') + deltaZ.toFixed(2)} m`, 16, yPos);
+    doc.text(`• Cota Máxima Z: ${maxZ.toFixed(2)} m`, 110, yPos); yPos += 7;
+    doc.text(`• Cota Mínima Z: ${minZ.toFixed(2)} m`, 16, yPos);
     doc.text(`• Cotas Medidas: ${points.length}`, 110, yPos); yPos += 10;
   }
 
-  // Tabla de Coordenadas Topográficas (X, Y, Z)
+  // TABLA DE COORDENADAS CON NORMATIVA CAD (Z = ELEVACIÓN / COTA)
   doc.setFontSize(12);
   doc.setTextColor(0, 150, 136);
   doc.setFont('helvetica', 'bold');
-  doc.text("Coordenadas Topográficas Puntos (X, Y, Z)", 14, yPos); yPos += 3;
+  doc.text("Coordenadas Topográficas (Z = Elevación / Cota)", 14, yPos); yPos += 3;
 
   doc.setFillColor(230, 230, 230);
   doc.rect(14, yPos, 182, 7, 'F');
   doc.setFontSize(9);
   doc.setTextColor(0, 0, 0);
   doc.text("Punto / Tipo", 18, yPos + 5);
-  doc.text("Coord X (m)", 70, yPos + 5);
-  doc.text("Cota Y (m)", 115, yPos + 5);
-  doc.text("Coord Z (m)", 160, yPos + 5);
+  doc.text("Eje X - Este (m)", 65, yPos + 5);
+  doc.text("Eje Y - Norte (m)", 110, yPos + 5);
+  doc.text("Eje Z - Elevación (m)", 155, yPos + 5);
   yPos += 8;
 
-  const allPts = [...points.map((p,i)=>({p, name:`P${i+1} Ext`})), ...innerPoints.map((p,i)=>({p, name:`P${i+1} Int`}))];
+  // MAPEADO: 
+  // p.x -> Coord X
+  // p.z -> Coord Y (Plano Planta Topográfico)
+  // p.y -> Coord Z (Cota de Elevación Topográfica)
+  const allPts = [
+    ...points.map((p, i) => ({ name: `P${i+1} Ext`, x: p.x, y: p.z, z: p.y })),
+    ...innerPoints.map((p, i) => ({ name: `P${i+1} Int`, x: p.x, y: p.z, z: p.y }))
+  ];
   
   doc.setFont('helvetica', 'normal');
   allPts.slice(0, 15).forEach((item) => {
     doc.text(item.name, 18, yPos);
-    doc.text(item.p.x.toFixed(3), 70, yPos);
-    doc.text(item.p.y.toFixed(3), 115, yPos);
-    doc.text(item.p.z.toFixed(3), 160, yPos);
+    doc.text(item.x.toFixed(3), 65, yPos);
+    doc.text(item.y.toFixed(3), 110, yPos);
+    doc.text(item.z.toFixed(3), 155, yPos);
     yPos += 6;
   });
 
@@ -947,7 +953,7 @@ function exportReportPDF() {
   doc.save(`GeoMeasure_Informe_${currentMode}_${new Date().toISOString().slice(0,10)}.pdf`);
 }
 
-// --- 8. ACTUALIZACIÓN DE MÉTRICAS ---
+// --- 9. ACTUALIZACIÓN DE MÉTRICAS ---
 function updateMetrics() {
   document.getElementById('btnClose').disabled = currentMode !== 'polygon' || points.length < 3 || isClosed;
   document.getElementById('btnAddManual').disabled = currentMode !== 'polygon' || !isClosed;
@@ -1008,7 +1014,7 @@ function updateMetrics() {
   }
 }
 
-// --- 9. EXPORTAR A DXF ---
+// --- 10. EXPORTAR A DXF ---
 function generateDXF(perimeterPts, innerPts, closed) {
   let dxf = [];
   dxf.push("0", "SECTION", "2", "HEADER", "0", "ENDSEC");
@@ -1048,7 +1054,7 @@ document.getElementById('btnExportDXF').addEventListener('click', () => {
   URL.revokeObjectURL(link.href);
 });
 
-// --- 10. INTERACCIÓN Y EVENTOS DE SELECCIÓN ---
+// --- 11. INTERACCIÓN Y EVENTOS DE SELECCIÓN ---
 function onPointerDown(event) {
   if (event.target.tagName === 'BUTTON' || 
       event.target.closest('#metrics') || 
