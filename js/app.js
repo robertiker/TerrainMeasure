@@ -53,7 +53,7 @@ document.getElementById('app-logo').src = highResLogo;
 document.getElementById('app-favicon').href = highResLogo;
 document.getElementById('apple-icon').href = highResLogo;
 
-function createTextSprite(text, colorStr = '#ffffff') {
+function createTextSprite(text, colorStr = '#ffffff', opacityVal = 1.0) {
   const canvasText = document.createElement('canvas');
   canvasText.width = 128; canvasText.height = 64;
   const ctx = canvasText.getContext('2d');
@@ -63,25 +63,35 @@ function createTextSprite(text, colorStr = '#ffffff') {
   ctx.fillText(text, 64, 32);
 
   const texture = new THREE.CanvasTexture(canvasText);
-  const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true });
+  const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true, opacity: opacityVal });
   const sprite = new THREE.Sprite(spriteMat);
   sprite.scale.set(0.8, 0.4, 1);
   return sprite;
 }
 
-function createRulerAxes(size = 20) {
+// EJES Y REGLAS GRADUADAS (Soft / Suaves para no interferir con las mediciones)
+function createRulerAxes(size = 20, isSoft = false) {
   const group = new THREE.Group();
   const axesHelper = new THREE.AxesHelper(size);
+
+  if (isSoft) {
+    // Opacidad atenuada para la vista principal
+    axesHelper.material.transparent = true;
+    axesHelper.material.opacity = 0.35;
+  }
   group.add(axesHelper);
 
+  const labelColor = isSoft ? '#888888' : '#ffffff';
+  const labelOpacity = isSoft ? 0.45 : 0.9;
+
   for (let i = 1; i <= size; i += 2) {
-    const spX = createTextSprite(`${i}m`, '#ff5252');
+    const spX = createTextSprite(`${i}m`, isSoft ? '#bb7777' : '#ff5252', labelOpacity);
     spX.position.set(i, -0.2, 0); group.add(spX);
 
-    const spY = createTextSprite(`${i}m`, '#69f0ae');
+    const spY = createTextSprite(`${i}m`, isSoft ? '#77bb77' : '#69f0ae', labelOpacity);
     spY.position.set(-0.3, i, 0); group.add(spY);
 
-    const spZ = createTextSprite(`${i}m`, '#448aff');
+    const spZ = createTextSprite(`${i}m`, isSoft ? '#7777bb' : '#448aff', labelOpacity);
     spZ.position.set(0, -0.2, i); group.add(spZ);
   }
   return group;
@@ -185,8 +195,11 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.05;
 
-scene.add(new THREE.GridHelper(20, 20, 0x444444, 0x222222));
-scene.add(createRulerAxes(20));
+// Rejilla y Ejes Suaves en Escena Principal
+const mainGrid = new THREE.GridHelper(20, 20, 0x333333, 0x1e1e1e);
+scene.add(mainGrid);
+scene.add(createRulerAxes(20, true)); // isSoft = true para opacidad sutil
+
 scene.add(new THREE.AmbientLight(0xffffff, 0.7));
 const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
 dirLight.position.set(10, 20, 10);
@@ -345,7 +358,7 @@ function update3DScene() {
 
     const dropPoints = [p.clone(), new THREE.Vector3(p.x, 0, p.z)];
     const dropGeo = new THREE.BufferGeometry().setFromPoints(dropPoints);
-    const dropMat = new THREE.LineDashedMaterial({ color: 0x888888, dashSize: 0.1, gapSize: 0.1 });
+    const dropMat = new THREE.LineDashedMaterial({ color: 0x666666, dashSize: 0.1, gapSize: 0.1 });
     const dropLine = new THREE.Line(dropGeo, dropMat);
     dropLine.computeLineDistances();
     projectionGroup.add(dropLine);
@@ -561,11 +574,12 @@ function drawDihedral3DPreview(canvasEl) {
   infoControls.update();
 
   const gridSize = Math.max(maxDim * 2.5, 12);
-  const grid = new THREE.GridHelper(gridSize, 16, 0x666666, 0x333333);
+  const grid = new THREE.GridHelper(gridSize, 16, 0x555555, 0x2a2a2a);
   grid.position.set(center.x, 0, center.z);
   infoScene.add(grid);
 
-  const ruler = createRulerAxes(gridSize / 2);
+  // Ejes normales nítidos para el modal
+  const ruler = createRulerAxes(gridSize / 2, false);
   infoScene.add(ruler);
 
   infoScene.add(new THREE.AmbientLight(0xffffff, 0.8));
@@ -813,7 +827,7 @@ function drawElevationPreview2D(canvasEl) {
   });
 }
 
-// --- 8. EXPORTACIÓN A PDF CON NORMATIVA TOPOGRÁFICA (Z = ELEVACIÓN) ---
+// --- 8. EXPORTACIÓN A PDF ---
 function exportReportPDF() {
   if (points.length === 0) {
     alert("No hay datos de medición para generar el PDF.");
@@ -823,7 +837,6 @@ function exportReportPDF() {
   const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
   const pCanvas = document.getElementById('previewCanvas');
 
-  // Encabezado
   doc.setFillColor(20, 20, 20);
   doc.rect(0, 0, 210, 28, 'F');
 
@@ -838,7 +851,6 @@ function exportReportPDF() {
   doc.setFont('helvetica', 'normal');
   doc.text(`Fecha: ${dateStr}`, 145, 18);
 
-  // Modo de Trabajo
   doc.setTextColor(40, 40, 40);
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
@@ -846,7 +858,6 @@ function exportReportPDF() {
                    (currentMode === 'distance' ? 'DISTANCIAS LINEALES' : 'ELEVACIONES / ALTIMETRÍA');
   doc.text(`TRABAJO: ${modeTitle}`, 14, 38);
 
-  // Captura del Canvas del Modal
   try {
     const imgData = pCanvas.toDataURL('image/png');
     doc.setFillColor(245, 245, 245);
@@ -856,7 +867,6 @@ function exportReportPDF() {
     console.error("Error al capturar la imagen para el PDF:", err);
   }
 
-  // Resumen de Métricas
   doc.setFontSize(12);
   doc.setTextColor(0, 150, 136);
   doc.text("Resumen de Métricas", 14, 146);
@@ -901,7 +911,7 @@ function exportReportPDF() {
     doc.text(`• Número de Tramos: ${points.length > 1 ? points.length - 1 : 0}`, 16, yPos); yPos += 10;
   }
   else if (currentMode === 'elevation') {
-    let deltaZ = points.length > 1 ? points[points.length - 1].y - points[0].y : 0; // Cota de elevación
+    let deltaZ = points.length > 1 ? points[points.length - 1].y - points[0].y : 0;
     let maxZ = Math.max(...points.map(p => p.y));
     let minZ = Math.min(...points.map(p => p.y));
 
@@ -911,7 +921,6 @@ function exportReportPDF() {
     doc.text(`• Cotas Medidas: ${points.length}`, 110, yPos); yPos += 10;
   }
 
-  // TABLA DE COORDENADAS CON NORMATIVA CAD (Z = ELEVACIÓN / COTA)
   doc.setFontSize(12);
   doc.setTextColor(0, 150, 136);
   doc.setFont('helvetica', 'bold');
@@ -927,10 +936,6 @@ function exportReportPDF() {
   doc.text("Eje Z - Elevación (m)", 155, yPos + 5);
   yPos += 8;
 
-  // MAPEADO: 
-  // p.x -> Coord X
-  // p.z -> Coord Y (Plano Planta Topográfico)
-  // p.y -> Coord Z (Cota de Elevación Topográfica)
   const allPts = [
     ...points.map((p, i) => ({ name: `P${i+1} Ext`, x: p.x, y: p.z, z: p.y })),
     ...innerPoints.map((p, i) => ({ name: `P${i+1} Int`, x: p.x, y: p.z, z: p.y }))
@@ -945,7 +950,6 @@ function exportReportPDF() {
     yPos += 6;
   });
 
-  // Pie de Página
   doc.setFontSize(8);
   doc.setTextColor(150, 180, 150);
   doc.text("Generado por GeoMeasure 3D - Aplicación Topográfica PWA", 14, 285);
